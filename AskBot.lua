@@ -1,0 +1,1036 @@
+-- AskBot.lua
+-- /askbot <question> (also /ab, /ask): answers "where is" questions from QuestieDB's data,
+-- in chat, with clickable [pin] links and a TomTom (or built-in) waypoint for the best answer.
+
+local ADDON_NAME, AskBot = ...
+local D = AskBot.Data
+
+local QUESTIEDB_CONTRACT = 4 -- the QuestieDB API contract this addon was written against
+local PREFIX = "|cff33ccffAskBot|r: "
+local GOLD, GREY = "|cffffd100", "|cffaaaaaa"
+
+-- Answers go to the chat window the last /askbot was typed in (remembered per character),
+-- falling back to the default chat window.
+local outputFrame
+
+local function say(msg)
+    local frame = outputFrame
+    if not frame and AskBotCharDB and AskBotCharDB.chatFrame then
+        frame = _G["ChatFrame" .. AskBotCharDB.chatFrame]
+    end
+    (frame or DEFAULT_CHAT_FRAME):AddMessage(PREFIX .. msg)
+end
+
+local function useChatFrameOf(editBox)
+    local frame = editBox and editBox.chatFrame
+    if frame and frame.AddMessage then
+        outputFrame = frame
+        local id = frame.GetID and frame:GetID()
+        if AskBotCharDB and id and _G["ChatFrame" .. id] == frame then AskBotCharDB.chatFrame = id end
+    end
+end
+
+local targetsById = {}
+for _, t in ipairs(AskBot.targets) do targetsById[t.id] = t end
+
+local pendingQuestion -- asked before the index was ready
+
+--------------------------------------------------------------------------------------------
+-- Pins and clickable links
+--------------------------------------------------------------------------------------------
+
+local lastTomTomWaypoint
+
+local function clearPins()
+    if lastTomTomWaypoint and TomTom and TomTom.RemoveWaypoint then
+        pcall(TomTom.RemoveWaypoint, TomTom, lastTomTomWaypoint)
+    end
+    lastTomTomWaypoint = nil
+    if C_Map and C_Map.ClearUserWaypoint then pcall(C_Map.ClearUserWaypoint) end
+end
+
+local function placePin(place, spawn, label)
+    local title = place.name .. (label and (" (" .. label .. ")") or "")
+    local x, y = spawn.x / 100, spawn.y / 100
+
+    if TomTom and TomTom.AddWaypoint then
+        if lastTomTomWaypoint and TomTom.RemoveWaypoint then
+            pcall(TomTom.RemoveWaypoint, TomTom, lastTomTomWaypoint)
+        end
+        local ok, uid = pcall(TomTom.AddWaypoint, TomTom, spawn.uiMapId, x, y, {
+            title = title, from = ADDON_NAME, persistent = false,
+            minimap = true, world = true, crazy = true,
+        })
+        if ok and uid then
+            lastTomTomWaypoint = uid
+            return "TomTom waypoint set"
+        end
+    end
+
+    if C_Map and C_Map.SetUserWaypoint and UiMapPoint then
+        local ok = pcall(function()
+            if C_Map.CanSetUserWaypointOnMap and not C_Map.CanSetUserWaypointOnMap(spawn.uiMapId) then
+                error("map does not allow waypoints")
+            end
+            C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(spawn.uiMapId, x, y))
+            if C_SuperTrack and C_SuperTrack.SetSuperTrackedUserWaypoint then
+                C_SuperTrack.SetSuperTrackedUserWaypoint(true)
+            end
+        end)
+        if ok then return "map pin set" end
+    end
+end
+
+-- Clickable chat links: each stores a function to run when clicked.
+local links, linkCount = {}, 0
+
+local function makeLink(text, run)
+    linkCount = linkCount + 1
+    links[linkCount] = run
+    return "|cff71d5ff|Haddon:askbot:" .. linkCount .. "|h[" .. text .. "]|h|r"
+end
+
+local function pinLink(place, spawn, label)
+    return makeLink("pin", function()
+        if not placePin(place, spawn, label) then say("Couldn't set a pin for " .. GOLD .. place.name .. "|r.") end
+    end)
+end
+
+local function onLinkClicked(link)
+    local n = type(link) == "string" and link:match("^addon:askbot:(%d+)")
+    local run = n and links[tonumber(n)]
+    if run then run() end
+end
+
+if EventRegistry and EventRegistry.RegisterCallback then
+    EventRegistry:RegisterCallback("SetItemRef", function(_, link) onLinkClicked(link) end)
+elseif SetItemRef then
+    hooksecurefunc("SetItemRef", onLinkClicked)
+end
+
+--------------------------------------------------------------------------------------------
+-- Formatting
+--------------------------------------------------------------------------------------------
+
+local function formatYards(d)
+    local n = math.floor(d + 0.5)
+    return (BreakUpLargeNumbers and BreakUpLargeNumbers(n) or tostring(n)) .. " yds"
+end
+
+local function formatTime(t)
+    if t < 60 then return "<1 min" end
+    return "~" .. math.floor(t / 60 + 0.5) .. " min"
+end
+
+local function levelText(place)
+    local lo, hi = place.minLevel, place.maxLevel
+    if not lo or lo <= 0 then return "" end
+    if hi and hi ~= lo then return " lvl " .. lo .. "-" .. hi end
+    return " lvl " .. lo
+end
+
+--- One line describing a ranked result, with a [pin] link.
+--- "Westfall 42.6, 71.8 (300 yds, ~1 min) [pin]" for a ranked result.
+local function whereText(r, label)
+    local p, s = r.place, r.spawn
+    local where = string.format("%s %.1f, %.1f", D.ZoneName(s.uiMapId), s.x, s.y)
+    local how
+    if r.route then
+        how = string.format(" (%s, fly %s > %s)", formatTime(r.time),
+            D.ZoneName(r.route.from.uiMapId), D.ZoneName(r.route.to.uiMapId))
+    elseif r.dist then
+        how = string.format(" (%s, %s)", formatYards(r.dist), formatTime(r.time))
+    else
+        how = " (other continent)"
+    end
+    return where .. how .. " " .. pinLink(p, s, label)
+end
+
+local function formatRate(rate)
+    if not rate then return "" end
+    local text = rate >= 10 and tostring(math.floor(rate + 0.5)) or string.format("%.1f", rate)
+    return " |cff66cc33" .. text .. "%|r"
+end
+
+--- One line describing a ranked result, with a [pin] link. `extra(place)` may add text
+--- after the name (e.g. a drop rate).
+local function describe(r, label, showLevel, extra)
+    local p = r.place
+    local sub = p.sub and (" <" .. p.sub .. ">") or ""
+    local lvl = showLevel and levelText(p) or ""
+    local more = extra and extra(p) or ""
+    return GOLD .. p.name .. "|r" .. sub .. lvl .. more .. " - " .. whereText(r, label)
+end
+
+--- Print up to `max` ranked results under a heading; pin the first if `pin` is set.
+--- Returns the best result.
+local function showRanked(places, heading, label, max, opts)
+    opts = opts or {}
+    local results, havePosition = D.Rank(places)
+    if #results == 0 then return nil end
+    if heading then
+        if #results > max and opts.countNoun then
+            heading = heading:gsub(":$", " (" .. #results .. " " .. opts.countNoun .. "):")
+        end
+        say(heading)
+    end
+    for i = 1, math.min(max, #results) do
+        say("  " .. describe(results[i], label, opts.showLevel, opts.extra))
+    end
+    if not havePosition then
+        say(GREY .. "  (I can't read your position here, so these aren't sorted by distance.)|r")
+    end
+    return results[1]
+end
+
+local function pinBest(best, label)
+    if best then placePin(best.place, best.spawn, label) end
+end
+
+--- Offer alternative names as links; clicking one asks `template` (a format string) again.
+local function didYouMean(others, template)
+    if not others or #others == 0 then return end
+    local parts = {}
+    for i, name in ipairs(others) do
+        local question = template:format(name)
+        parts[i] = makeLink(name, function() AskBot.Ask(question) end)
+    end
+    say(GREY .. "Did you mean:|r " .. table.concat(parts, " ") .. GREY .. "?|r")
+end
+
+local dropRateNoteShown = false
+
+--------------------------------------------------------------------------------------------
+-- Answers
+--------------------------------------------------------------------------------------------
+
+local function friendlyPlaces(list)
+    local mine = D.PlayerFaction()
+    local out = {}
+    for _, p in ipairs(list or {}) do
+        if D.IsFriendly(p, mine) then out[#out + 1] = p end
+    end
+    return out
+end
+
+local function answerTarget(target)
+    local places = friendlyPlaces(D.byTarget[target.id])
+    if #places == 0 then
+        say("I couldn't find a " .. target.label .. " friendly to you.")
+        return
+    end
+    local best = showRanked(places, "Nearest " .. target.label .. ":", target.label, 3)
+    pinBest(best, target.label)
+end
+
+local function placesForIds(npcIds, objectIds, friendlyOnly)
+    local mine = D.PlayerFaction()
+    local out, seen = {}, {}
+    for _, id in ipairs(npcIds or {}) do
+        local p = not seen["n" .. id] and D.NpcPlace(id)
+        seen["n" .. id] = true
+        if p and #p.spawns > 0 and (not friendlyOnly or D.IsFriendly(p, mine)) then out[#out + 1] = p end
+    end
+    for _, id in ipairs(objectIds or {}) do
+        local p = not seen["o" .. id] and D.ObjectPlace(id)
+        seen["o" .. id] = true
+        if p and #p.spawns > 0 then out[#out + 1] = p end
+    end
+    return out
+end
+
+local function questAvailable(id)
+    local races = QuestDB.requiredRaces(id)
+    if not races or races == 0 then return true end
+    local masks = LibQuestieDB.Enum.factionRaceMasks
+    local mask = masks and masks[UnitFactionGroup("player") or ""]
+    return not mask or D.MasksOverlap(races, mask)
+end
+
+local function itemName(id)
+    return ItemDB.name(id) or (C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(id)) or ("item " .. id)
+end
+
+--------------------------------------------------------------------------------------------
+-- Quests in the player's log: objectives and turn-in
+--------------------------------------------------------------------------------------------
+
+local function questInLog(id)
+    if C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
+        return C_QuestLog.GetLogIndexForQuestID(id) ~= nil
+    end
+    if GetQuestLogIndexByID then
+        local i = GetQuestLogIndexByID(id)
+        return i ~= nil and i > 0
+    end
+    return false
+end
+
+local function questComplete(id)
+    if C_QuestLog and C_QuestLog.IsComplete then return C_QuestLog.IsComplete(id) end
+    if IsQuestComplete then return IsQuestComplete(id) end
+    return false
+end
+
+-- Lower-cased text of the objectives the game says are finished ("defias thug slain: 15/15").
+local function finishedObjectiveTexts(id)
+    local out = {}
+    local objectives = C_QuestLog and C_QuestLog.GetQuestObjectives and C_QuestLog.GetQuestObjectives(id)
+    for _, o in ipairs(objectives or {}) do
+        if o.finished and o.text then out[#out + 1] = o.text:lower() end
+    end
+    return out
+end
+
+--- The quest's objectives as { verb, name, places, showLevel }.
+local function questObjectives(id)
+    local list = {}
+    local o = QuestDB.objectives(id) or {}
+    for _, c in ipairs(o[1] or {}) do -- creatures to kill
+        local p = D.NpcPlace(c[1])
+        if p then list[#list + 1] = { "Kill", c[2] or p.name, placesForIds({ c[1] }), true } end
+    end
+    for _, c in ipairs(o[2] or {}) do -- objects to use
+        local p = D.ObjectPlace(c[1])
+        if p then list[#list + 1] = { "Use", c[2] or p.name, placesForIds(nil, { c[1] }) } end
+    end
+    for _, c in ipairs(o[3] or {}) do -- items to collect
+        local drops = placesForIds(ItemDB.npcDrops(c[1]), ItemDB.objectDrops(c[1]))
+        list[#list + 1] = { "Collect", c[2] or itemName(c[1]), drops, true }
+    end
+    for _, c in ipairs(o[5] or {}) do -- kill credit (any of several NPCs counts)
+        list[#list + 1] = { "Kill", c[3] or NpcDB.name(c[2]) or "target", placesForIds(c[1]), true }
+    end
+    local trigger = QuestDB.triggerEnd(id) -- "explore X" style objectives
+    if trigger and trigger[1] then
+        local spawns = D.ResolveSpawns(trigger[2])
+        list[#list + 1] = { "Go to", trigger[1], #spawns > 0 and { { kind = "area", name = trigger[1], spawns = spawns } } or {} }
+    end
+    return list
+end
+
+local function answerQuestInLog(id, name)
+    local complete = questComplete(id)
+    say("Quest " .. GOLD .. name .. "|r " .. (complete and "is complete:" or "is in progress:"))
+
+    local nearest
+    if not complete then
+        local done = finishedObjectiveTexts(id)
+        local function isDone(objName)
+            local n = objName:lower()
+            for _, t in ipairs(done) do if t:find(n, 1, true) then return true end end
+            return false
+        end
+        for _, obj in ipairs(questObjectives(id)) do
+            local verb, objName, places, showLevel = obj[1], obj[2], obj[3], obj[4]
+            if not isDone(objName) then
+                local best = #places > 0 and D.Rank(places)[1]
+                if best then
+                    local prefix = verb == "Collect" and ("Collect " .. GOLD .. objName .. "|r from: ") or (verb .. ": ")
+                    say("  " .. prefix .. describe(best, objName, showLevel))
+                    if not nearest or (best.time and (not nearest.time or best.time < nearest.time)) then
+                        nearest = best
+                    end
+                else
+                    say("  " .. verb .. " " .. GOLD .. objName .. "|r " .. GREY .. "(Questie doesn't know where)|r")
+                end
+            end
+        end
+    end
+
+    local who = QuestDB.finishedBy(id) or {}
+    local turnIn = D.Rank(placesForIds(who[1], who[2]))[1]
+    if turnIn then
+        say("  Turn in: " .. describe(turnIn, "turn in"))
+    else
+        say("  Turn in: " .. GREY .. "Questie doesn't know where.|r")
+    end
+
+    local target = (complete or not nearest) and turnIn or nearest
+    if target then placePin(target.place, target.spawn, name) end
+end
+
+--- mode: "start", "end" or "auto" (a quest in your log shows its progress, else its start).
+local function answerQuest(query, mode, questIds)
+    local finish = mode == "end"
+    local hits, others
+    if questIds then
+        hits = {}
+        for _, id in ipairs(questIds) do hits[#hits + 1] = { nil, id, QuestDB.name(id) or ("quest " .. id) } end
+    else
+        hits, others = D.FindByName(D.questNames, query)
+    end
+    if not hits then
+        say("I couldn't find a quest called \"" .. query .. "\".")
+        return
+    end
+
+    if mode == "auto" then
+        for _, e in ipairs(hits) do
+            if questInLog(e[2]) then return answerQuestInLog(e[2], e[3]) end
+        end
+    end
+
+    local quests = {}
+    for _, e in ipairs(hits) do
+        if questAvailable(e[2]) then quests[#quests + 1] = e end
+    end
+    if #quests == 0 then
+        say("\"" .. hits[1][3] .. "\" isn't available to your faction.")
+        return
+    end
+    table.sort(quests, function(a, b) return (QuestDB.questLevel(a[2]) or 0) < (QuestDB.questLevel(b[2]) or 0) end)
+
+    local firstBest
+    for i = 1, math.min(3, #quests) do
+        local id, name = quests[i][2], quests[i][3]
+        local level, req = QuestDB.questLevel(id), QuestDB.requiredLevel(id)
+        local info = level and level > 0 and (" (level " .. level .. (req and req > 0 and (", needs " .. req) or "") .. ")") or ""
+        local who
+        if finish then who = QuestDB.finishedBy(id) else who = QuestDB.startedBy(id) end
+        who = who or {}
+        local places = placesForIds(who[1], who[2])
+        local verb = finish and "is handed in to" or "starts at"
+        local best = showRanked(places, "Quest " .. GOLD .. name .. "|r" .. info .. " " .. verb .. ":", name, 2)
+        firstBest = firstBest or best
+        if not finish and who[3] then
+            for _, itemId in ipairs(who[3]) do
+                say("  starts from the item " .. GOLD .. itemName(itemId) .. "|r " ..
+                    GREY .. "(/askbot where does " .. itemName(itemId) .. " drop)|r")
+            end
+        end
+        if not best and not (not finish and who[3]) then
+            say("Quest " .. GOLD .. name .. "|r" .. info .. ": Questie doesn't know where it " ..
+                (finish and "ends." or "starts."))
+        end
+    end
+    if #quests > 3 then say(GREY .. "  ...plus " .. (#quests - 3) .. " more quests with that name.|r") end
+    didYouMean(others, finish and "who do i turn in %s to" or "who gives %s")
+    pinBest(firstBest, finish and "turn in" or "quest")
+end
+
+local function collectItem(hits, field)
+    local out, seen = {}, {}
+    for _, e in ipairs(hits) do
+        for _, v in ipairs(ItemDB[field](e[2]) or {}) do
+            if not seen[v] then seen[v] = true; out[#out + 1] = v end
+        end
+    end
+    return out
+end
+
+--- mode: "buy", "drop" or "get" (everything we know).
+local function answerItem(query, mode, hits, others)
+    if not hits then
+        -- For partial names, prefer items that fit the question ("linen" + drop -> Linen Cloth).
+        -- (Items named only by AtlasLoot aren't in Questie's ItemDB, so guard every read.)
+        local function has(field) return function(e) local v = ItemDB[field](e[2]); return v ~= nil and #v > 0 end end
+        local function bossLoot(e) return AskBot.Loot.byItem[e[2]] ~= nil end
+        local accept
+        if mode == "buy" then
+            accept = has("vendors")
+        elseif mode == "drop" then
+            local npc, obj = has("npcDrops"), has("objectDrops")
+            accept = function(e) return npc(e) or obj(e) or bossLoot(e) end
+        else
+            local sources = { has("vendors"), has("npcDrops"), has("objectDrops"), has("questRewards"), has("itemDrops"), bossLoot }
+            accept = function(e)
+                for _, f in ipairs(sources) do if f(e) then return true end end
+                return false
+            end
+        end
+        hits, others = D.FindByName(D.itemNames, query, accept)
+        if not hits and query:sub(-1) == "s" then
+            hits, others = D.FindByName(D.itemNames, query:sub(1, -2), accept)
+        end
+    end
+    if not hits then
+        say("I couldn't find an item called \"" .. query .. "\".")
+        return
+    end
+    local name = hits[1][3]
+    local best, anything, shownDrops, ratesShown
+
+    if mode == "buy" or mode == "get" then
+        local vendors = placesForIds(collectItem(hits, "vendors"), nil, true)
+        if #vendors > 0 then
+            anything = true
+            best = showRanked(vendors, GOLD .. name .. "|r is sold by:", name, mode == "buy" and 3 or 2,
+                { countNoun = "vendors" })
+        elseif mode == "buy" then
+            say("No vendor friendly to you sells " .. GOLD .. name .. "|r, as far as Questie knows.")
+        end
+    end
+
+    if mode == "drop" or mode == "get" or (mode == "buy" and not anything) then
+        local droppers = placesForIds(collectItem(hits, "npcDrops"), collectItem(hits, "objectDrops"))
+        local questieNpcs = {}
+        for _, p in ipairs(droppers) do if p.kind == "npc" then questieNpcs[p.id] = true end end
+        local function rateFor(place)
+            if place.kind ~= "npc" then return nil end
+            for _, e in ipairs(hits) do
+                local r = AskBot.Loot.DropRate(place.id, e[2])
+                if r then return r end
+            end
+        end
+        if #droppers > 0 then
+            anything, shownDrops = true, true
+            local b = showRanked(droppers, GOLD .. name .. "|r drops from:", name, 3, {
+                showLevel = true, countNoun = "sources",
+                extra = function(place)
+                    local r = rateFor(place)
+                    if r then ratesShown = true end
+                    return formatRate(r)
+                end,
+            })
+            best = best or b
+        end
+
+        -- Dungeon and raid bosses from AtlasLoot that Questie didn't already list.
+        local bossSources = {}
+        for _, e in ipairs(hits) do
+            for _, src in ipairs(AskBot.Loot.byItem[e[2]] or {}) do
+                if not (src.boss.npcId and questieNpcs[src.boss.npcId]) then bossSources[#bossSources + 1] = src end
+            end
+        end
+        if #bossSources > 0 then
+            anything = true
+            table.sort(bossSources, function(a, b) return (a.rate or -1) > (b.rate or -1) end)
+            say(#droppers > 0 and "  also from:" or (GOLD .. name .. "|r drops from:"))
+            for i = 1, math.min(3, #bossSources) do
+                local src = bossSources[i]
+                if src.rate then ratesShown = true end
+                local line = "  " .. GOLD .. src.boss.name .. "|r" .. formatRate(src.rate) .. " - " .. src.boss.instance.name
+                local entrance = AskBot.Loot.EntrancePlace(src.boss.instance)
+                local r = entrance and D.Rank({ entrance })[1]
+                if r then
+                    line = line .. ", entrance " .. whereText(r, src.boss.instance.name)
+                    best = best or r
+                end
+                say(line)
+            end
+        end
+
+        if #droppers == 0 and #bossSources == 0 and mode == "drop" then
+            say("Neither Questie nor AtlasLoot lists anything that drops " .. GOLD .. name .. "|r.")
+        end
+    end
+
+    if mode ~= "buy" then
+        local rewards = collectItem(hits, "questRewards")
+        for i = 1, math.min(2, #rewards) do
+            anything = true
+            say(GOLD .. name .. "|r is a reward from quest " .. GOLD .. (QuestDB.name(rewards[i]) or rewards[i]) .. "|r " ..
+                GREY .. "(/askbot who gives " .. (QuestDB.name(rewards[i]) or "") .. ")|r")
+        end
+        local containers = collectItem(hits, "itemDrops")
+        for i = 1, math.min(2, #containers) do
+            anything = true
+            say(GOLD .. name .. "|r is found inside " .. GOLD .. itemName(containers[i]) .. "|r")
+        end
+    end
+
+    if not anything and mode ~= "buy" and mode ~= "drop" then
+        say("Questie doesn't know where to get " .. GOLD .. name .. "|r.")
+    end
+    if mode == "get" then
+        local price = AskBot.Prices.Auction(hits[1][2])
+        if price then say("  AH price: " .. AskBot.Prices.Format(price)) end
+    end
+    if shownDrops and not ratesShown and not dropRateNoteShown then
+        dropRateNoteShown = true
+        say(GREY .. "  (No drop rates known for these.)|r")
+    end
+    local templates = { buy = "where can i buy %s", drop = "where does %s drop", get = "where can i get %s" }
+    didYouMean(others, templates[mode])
+    pinBest(best, name)
+end
+
+local function answerNpcName(hits, others)
+    local places = {}
+    for _, e in ipairs(hits) do
+        local p = D.NpcPlace(e[2])
+        if p and #p.spawns > 0 then places[#places + 1] = p end
+    end
+    if #places == 0 then
+        say("Questie doesn't know where " .. GOLD .. hits[1][3] .. "|r is.")
+        return
+    end
+    local best = showRanked(places, nil, nil, 3, { showLevel = true })
+    didYouMean(others, "where is %s")
+    pinBest(best)
+end
+
+--------------------------------------------------------------------------------------------
+-- Loot tables (AtlasLoot) and prices (Auctionator)
+--------------------------------------------------------------------------------------------
+
+--- A clickable item link if the game has the item cached, else its name in brackets.
+local function itemLinkText(id)
+    local getInfo = (C_Item and C_Item.GetItemInfo) or GetItemInfo
+    local link = getInfo and select(2, getInfo(id))
+    if link then return link end
+    if C_Item and C_Item.RequestLoadItemDataByID then C_Item.RequestLoadItemDataByID(id) end
+    local name = (C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(id)) or ItemDB.name(id) or ("item " .. id)
+    return "|cffffffff[" .. name .. "]|r"
+end
+
+local function lootUnavailable()
+    local status = AskBot.Loot.status
+    if status == "absent" then
+        say("I need AtlasLoot (Forever) installed to answer loot questions.")
+    elseif status == "loading" then
+        say("Still reading AtlasLoot's loot tables, try again in a moment.")
+    else
+        return false
+    end
+    return true
+end
+
+local function sayEntrance(instance)
+    local entrance = AskBot.Loot.EntrancePlace(instance)
+    local r = entrance and D.Rank({ entrance })[1]
+    if r then
+        say("  Entrance: " .. whereText(r, instance.name))
+        placePin(r.place, r.spawn, instance.name)
+    end
+end
+
+local function answerBossLoot(boss)
+    local inst = boss.instance
+    say(GOLD .. boss.name .. "|r (" .. inst.name .. ") drops:")
+    local parts = {}
+    for _, id in ipairs(boss.items) do
+        parts[#parts + 1] = itemLinkText(id) .. (boss.npcId and formatRate(AskBot.Loot.DropRate(boss.npcId, id)) or "")
+        if #parts == 3 then say("  " .. table.concat(parts, ", ")); parts = {} end
+    end
+    if #parts > 0 then say("  " .. table.concat(parts, ", ")) end
+    sayEntrance(inst)
+end
+
+local function answerInstanceLoot(instance)
+    local range = instance.levelRange
+    local levels = range and (" (levels " .. range[1] .. "-" .. range[#range] .. ")") or ""
+    say(GOLD .. instance.name .. "|r" .. levels .. ", bosses:")
+    local parts = {}
+    for _, boss in ipairs(instance.bosses) do
+        parts[#parts + 1] = makeLink(boss.name, function() AskBot.Ask("what does " .. boss.name .. " drop") end)
+        if #parts == 4 then say("  " .. table.concat(parts, " ")); parts = {} end
+    end
+    if #parts > 0 then say("  " .. table.concat(parts, " ")) end
+    sayEntrance(instance)
+end
+
+--- "what does X drop": X is a boss or an instance. Returns false if nothing matched.
+local function answerLoot(subject, quietIfMissing)
+    if AskBot.Loot.status ~= "ready" then
+        if quietIfMissing then return false end
+        lootUnavailable()
+        return true
+    end
+    local key = D.NameKey(subject)
+    local bosses, bossOthers = D.FindByName(AskBot.Loot.bossNames, subject)
+    local insts, instOthers = D.FindByName(AskBot.Loot.instanceNames, subject)
+    -- Prefer an exact name; otherwise a boss over an instance.
+    if insts and insts[1][1] == key and not (bosses and bosses[1][1] == key) then
+        answerInstanceLoot(insts[1][2])
+        didYouMean(instOthers, "what does %s drop")
+        return true
+    end
+    if bosses then
+        answerBossLoot(bosses[1][2])
+        didYouMean(bossOthers, "what does %s drop")
+        return true
+    end
+    if insts then
+        answerInstanceLoot(insts[1][2])
+        didYouMean(instOthers, "what does %s drop")
+        return true
+    end
+    if quietIfMissing then return false end
+    say("AtlasLoot has no loot table for \"" .. subject .. "\". It covers dungeon and raid bosses.")
+    return true
+end
+
+local function answerPrice(query, hits)
+    local P = AskBot.Prices
+    local others
+    if not hits then
+        local accept = P.Available() and function(e) return P.Auction(e[2]) ~= nil end or nil
+        hits, others = D.FindByName(D.itemNames, query, accept)
+        if not hits and query:sub(-1) == "s" then hits, others = D.FindByName(D.itemNames, query:sub(1, -2), accept) end
+    end
+    if not hits then
+        say("I couldn't find an item called \"" .. query .. "\".")
+        return
+    end
+    local id = hits[1][2]
+    local parts = {}
+    if P.Available() then
+        local price, age = P.Auction(id), P.AgeDays(id)
+        if price then
+            local when = age == 0 and "seen today" or age == 1 and "seen yesterday" or age and ("seen " .. age .. " days ago")
+                or "over 3 weeks old"
+            parts[#parts + 1] = "AH " .. P.Format(price) .. " " .. GREY .. "(" .. when .. ")|r"
+        else
+            parts[#parts + 1] = "no AH price yet " .. GREY .. "(scan the auction house with Auctionator)|r"
+        end
+        local vendorBuy = P.VendorBuy(id)
+        if vendorBuy then parts[#parts + 1] = "vendors sell it for " .. P.Format(vendorBuy) end
+    else
+        parts[#parts + 1] = GREY .. "install Auctionator for auction prices|r"
+    end
+    local sell = P.VendorSell(id)
+    if sell then parts[#parts + 1] = "vendors pay " .. P.Format(sell) end
+    say(itemLinkText(id) .. ": " .. table.concat(parts, ", "))
+    didYouMean(others, "price of %s")
+end
+
+--------------------------------------------------------------------------------------------
+-- Understanding the question
+--------------------------------------------------------------------------------------------
+
+local INTENTS = {
+    { "loot", {
+        "^what does (.+) drop$", "^what do (.+) drop$", "^what drops in (.+)$", "^what drops from (.+)$",
+        "^what can i get from (.+)$", "^loot from (.+)$", "^drops from (.+)$", "^loot (.+)$",
+        "^(.+) loot table$", "^(.+) loot$" } },
+    { "price", {
+        "^how much is (.+) worth$", "^how much are (.+) worth$", "^how much does (.+) sell for$",
+        "^how much do (.+) sell for$", "^how much is (.+)$", "^how much are (.+)$", "^what is (.+) worth$",
+        "^what are (.+) worth$", "^price of (.+)$", "^ah price of (.+)$", "^ah price (.+)$", "^value of (.+)$",
+        "^price (.+)$", "^(.+) ah price$", "^(.+) price$", "^(.+) worth$" } },
+    { "questEnd", {
+        "^who do i turn in (.+) to$", "^who do i hand in (.+) to$", "^where do i turn in (.+)$",
+        "^where do i hand in (.+)$", "^turn in (.+)$", "^hand in (.+)$", "^who ends (.+)$",
+        "^who completes (.+)$", "^who finishes (.+)$", "^where does (.+) end$", "^where does (.+) finish$" } },
+    { "questStart", {
+        "^who gives (.+)$", "^who starts (.+)$", "^who offers (.+)$", "^where do i get the quest (.+)$",
+        "^where do i get quest (.+)$", "^where can i get the quest (.+)$", "^where can i get quest (.+)$",
+        "^where does the quest (.+) start$", "^where does quest (.+) start$", "^where does (.+) start$",
+        "^where do i start (.+)$", "^start quest (.+)$", "^quest (.+)$" } },
+    { "buy", {
+        "^where can i buy (.+)$", "^where do i buy (.+)$", "^where to buy (.+)$", "^who sells (.+)$",
+        "^where is (.+) sold$", "^where are (.+) sold$", "^what vendor sells (.+)$", "^buy (.+)$",
+        "^vendor for (.+)$", "^sells (.+)$" } },
+    { "drop", {
+        "^where does (.+) drop$", "^where do (.+) drop$", "^what drops (.+)$", "^who drops (.+)$",
+        "^what mob drops (.+)$", "^what mobs drop (.+)$", "^where can i farm (.+)$", "^where do i farm (.+)$",
+        "^where to farm (.+)$", "^farm (.+)$", "^drops (.+)$", "^drop (.+)$" } },
+    { "get", {
+        "^where can i get (.+)$", "^where do i get (.+)$", "^where can i find (.+)$", "^where do i find (.+)$",
+        "^how do i get (.+)$", "^how to get (.+)$", "^where to get (.+)$", "^where to find (.+)$",
+        "^get (.+)$", "^find (.+)$", "^item (.+)$" } },
+}
+
+local LEADING_NOISE = { "a ", "an ", "some ", "my ", "the quest ", "quest " }
+local TRAILING_NOISE = { " quest", " please", " from" }
+
+local function cleanSubject(s)
+    local changed = true
+    while changed do
+        changed = false
+        for _, w in ipairs(LEADING_NOISE) do
+            if s:sub(1, #w) == w and #s > #w then s = s:sub(#w + 1); changed = true end
+        end
+        for _, w in ipairs(TRAILING_NOISE) do
+            if s:sub(-#w) == w and #s > #w then s = s:sub(1, -#w - 1); changed = true end
+        end
+    end
+    return s
+end
+
+local function normalize(s)
+    s = " " .. s:lower() .. " "
+    s = s:gsub("(%a)'s ", "%1 is "):gsub("'", ""):gsub("[^%w%s]", " "):gsub("%s+", " ")
+    s = s:match("^%s*(.-)%s*$")
+    s = s:gsub("^please ", ""):gsub("^askbot ", "")
+    return s
+end
+
+local function hasKey(q, key)
+    q = " " .. q .. " "
+    if #key <= 3 then
+        return q:find(" " .. key .. " ", 1, true) ~= nil
+    end
+    return q:find(" " .. key, 1, true) ~= nil
+end
+
+local function findTarget(q)
+    for _, t in ipairs(AskBot.targets) do
+        for _, key in ipairs(t.keys) do
+            if hasKey(q, key) then return t end
+        end
+    end
+    for _, key in ipairs(AskBot.classTrainerKeys) do
+        if hasKey(q, key) then
+            local _, classFile = UnitClass("player")
+            return targetsById[classFile]
+        end
+    end
+end
+
+local function exactHits(list, query)
+    local hits, others = D.FindByName(list, query)
+    if hits and hits[1][1] == D.NameKey(query) then return hits, others end
+end
+
+local NPC_PREFIXES = { "where is ", "where are ", "who is ", "find ", "where can i find ", "where do i find " }
+
+local function answer(question)
+    -- Shift-clicked item or quest links carry their IDs.
+    local itemId = question:match("|Hitem:(%d+)")
+    local questId = question:match("|Hquest:(%d+)") or question:match("|Hquestie:(%d+)")
+    local plain = question:gsub("|H.-|h%[?(.-)%]?|h", "%1"):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+    -- Questie quest links can arrive as plain text, "[[15] Hilary's Necklace (3741)]": the
+    -- level may read "15+", "60D" etc., and the "(id)" only shows if Questie is set to show IDs.
+    questId = questId or plain:match("%[%[[^%]]*%][^%[%]]-%((%d+)%)%]")
+    plain = plain:gsub("%[%[[^%]]*%]%s*([^%[%]]-)%s*%(%d+%)%]", "%1"):gsub("%[%[[^%]]*%]%s*([^%[%]]-)%]", "%1")
+    local q = normalize(plain)
+
+    local intent, subject
+    for _, entry in ipairs(INTENTS) do
+        for _, pattern in ipairs(entry[2]) do
+            local cap = q:match(pattern)
+            if cap then intent, subject = entry[1], cleanSubject(cap); break end
+        end
+        if intent then break end
+    end
+
+    if questId then
+        return answerQuest(nil, intent == "questEnd" and "end" or intent == "questStart" and "start" or "auto", { tonumber(questId) })
+    end
+    if itemId then
+        local id = tonumber(itemId)
+        local hits = { { nil, id, itemName(id) } }
+        if intent == "price" then return answerPrice(nil, hits) end
+        local mode = (intent == "buy" or intent == "drop") and intent or "get"
+        return answerItem(nil, mode, hits)
+    end
+
+    if intent == "loot" then
+        return answerLoot(subject)
+    elseif intent == "price" then
+        return answerPrice(subject)
+    elseif intent == "questStart" or intent == "questEnd" then
+        return answerQuest(subject, intent == "questEnd" and "end" or "start")
+    elseif intent == "buy" or intent == "drop" then
+        return answerItem(subject, intent)
+    elseif intent == "get" then
+        -- "where can I get X": an item with exactly that name, else a service, else anything.
+        local hits, others = exactHits(D.itemNames, subject)
+        if hits then return answerItem(subject, "get", hits, others) end
+        local target = findTarget(subject)
+        if target then return answerTarget(target) end
+        hits, others = exactHits(D.npcNames, subject)
+        if hits then return answerNpcName(hits, others) end
+        -- Partial item names: let answerItem pick the candidate that has a known source.
+        if D.FindByName(D.itemNames, subject) then return answerItem(subject, "get") end
+        return answerQuest(subject, "auto")
+    end
+
+    -- No question pattern: a service ("nearest flight master"), an NPC by name, an item, a quest.
+    local target = findTarget(q)
+    if target then return answerTarget(target) end
+
+    local subject2 = q
+    for _, prefix in ipairs(NPC_PREFIXES) do
+        if subject2:sub(1, #prefix) == prefix then subject2 = subject2:sub(#prefix + 1); break end
+    end
+    subject2 = cleanSubject(subject2)
+    -- A boss or dungeon name on its own most likely means "what does it drop".
+    if AskBot.Loot.status == "ready" and (exactHits(AskBot.Loot.bossNames, subject2) or exactHits(AskBot.Loot.instanceNames, subject2)) then
+        return answerLoot(subject2)
+    end
+    local hits, others = exactHits(D.npcNames, subject2)
+    if hits then return answerNpcName(hits, others) end
+    hits, others = exactHits(D.itemNames, subject2)
+    if hits then return answerItem(subject2, "get", hits, others) end
+    hits, others = exactHits(D.questNames, subject2)
+    if hits then return answerQuest(subject2, "auto") end
+    hits, others = D.FindByName(D.npcNames, subject2)
+    if hits then return answerNpcName(hits, others) end
+    hits, others = D.FindByName(D.questNames, subject2)
+    if hits then return answerQuest(subject2, "auto") end
+    if D.FindByName(D.itemNames, subject2) then return answerItem(subject2, "get") end
+    if answerLoot(subject2, true) then return end
+
+    say("Sorry, I don't know how to answer that yet. Try " .. GOLD .. "/askbot help|r.")
+end
+
+--------------------------------------------------------------------------------------------
+-- Startup
+--------------------------------------------------------------------------------------------
+
+--- Run `fn` as a coroutine, one step per frame; then call onDone(ok, err).
+local function runInBackground(fn, onDone)
+    local co = coroutine.create(fn)
+    local driver = CreateFrame("Frame")
+    driver:SetScript("OnUpdate", function(self)
+        local ok, err = coroutine.resume(co)
+        if not ok or coroutine.status(co) == "dead" then
+            self:SetScript("OnUpdate", nil)
+            onDone(ok, err)
+        end
+    end)
+end
+
+local function startIndexing()
+    D.status = "indexing"
+    if _G.AtlasLoot then AskBot.Loot.status = "loading" end
+    runInBackground(D.BuildIndex, function(ok, err)
+        if not ok then
+            D.status = "failed"
+            say("Indexing failed: " .. tostring(err))
+            return
+        end
+        D.status = "ready"
+        D.progress = 1
+        if pendingQuestion then
+            local q = pendingQuestion
+            pendingQuestion = nil
+            AskBot.Ask(q)
+        end
+        -- Optional: AtlasLoot loot tables (they also add gear names to the item index).
+        if _G.AtlasLoot then
+            runInBackground(AskBot.Loot.Build, function(lootOk, lootErr)
+                if not lootOk then
+                    AskBot.Loot.status = "absent"
+                    say("Couldn't read AtlasLoot's data: " .. tostring(lootErr))
+                    if geterrorhandler then geterrorhandler()(lootErr) end
+                end
+            end)
+        end
+    end)
+end
+
+-- Questie builds its zone tables during its own staged start-up, so wait for it.
+local function waitForQuestie()
+    local waited = 0
+    local ticker
+    ticker = C_Timer.NewTicker(1, function()
+        waited = waited + 1
+        local ready = Questie and Questie.started and QuestieLoader and _G.LibQuestieDB
+            and _G.NpcDB and _G.QuestDB and _G.ItemDB and _G.ObjectDB
+        if not ready then
+            if waited >= 180 then
+                ticker:Cancel()
+                D.status = "failed"
+                say("Gave up waiting for Questie to finish loading.")
+            end
+            return
+        end
+        ticker:Cancel()
+
+        local ok, msg = LibQuestieDB.RequireContract(QUESTIEDB_CONTRACT)
+        if not ok then
+            D.status = "failed"
+            say("This QuestieDB version isn't compatible: " .. tostring(msg))
+            return
+        end
+
+        local hbd = LibStub and LibStub("HereBeDragons-2.0", true)
+        local zoneDB = QuestieLoader:ImportModule("ZoneDB")
+        local flags = LibQuestieDB.Enum and LibQuestieDB.Enum.npcFlags
+        if not hbd or not zoneDB or not flags then
+            D.status = "failed"
+            say("Missing a piece from Questie (HereBeDragons, ZoneDB or NPC flags).")
+            return
+        end
+        D.Init(hbd, zoneDB, flags)
+        startIndexing()
+    end)
+end
+
+local events = CreateFrame("Frame")
+events:RegisterEvent("PLAYER_LOGIN")
+events:RegisterEvent("TAXIMAP_OPENED")
+events:SetScript("OnEvent", function(_, event)
+    if event == "PLAYER_LOGIN" then
+        AskBotCharDB = AskBotCharDB or {}
+        AskBotCharDB.knownTaxi = AskBotCharDB.knownTaxi or {}
+        waitForQuestie()
+    elseif event == "TAXIMAP_OPENED" then
+        local ok, learned = pcall(D.RecordTaxiNodes)
+        if ok and learned and learned > 0 then
+            say("Learned " .. learned .. " flight path" .. (learned == 1 and "" or "s") .. " for route planning.")
+        end
+    end
+end)
+
+--------------------------------------------------------------------------------------------
+-- Slash commands
+--------------------------------------------------------------------------------------------
+
+local function help()
+    say("Ask me where things are. Examples:")
+    say("  /askbot where is my nearest skinning trainer")
+    say("  /askbot nearest flight master    /askbot where's my class trainer")
+    say("  /askbot who gives The Defias Brotherhood    /askbot turn in Bounty on Murlocs")
+    say("  /askbot where can I buy Coarse Thread    /askbot where does Linen Cloth drop")
+    say("  /askbot where is Gryan Stoutmantle    /askbot [shift-click an item or quest]")
+    say("  /askbot what does VanCleef drop    /askbot Deadmines loot    /askbot price of Linen Cloth")
+    say("Click " .. "|cff71d5ff[pin]|r" .. " on any answer to put a pin on it.")
+    say("/askbot clear - remove the pin.  /askbot status - index info.  Also /ab and /ask.")
+end
+
+local function status()
+    local _, assumed = D.FlightMasters()
+    local known = 0
+    for _ in pairs(AskBotCharDB and AskBotCharDB.knownTaxi or {}) do known = known + 1 end
+    say(string.format("Status: %s (%d%%). %d services/trainers, %d NPC, %d quest and %d item names.",
+        D.status, math.floor(D.progress * 100), D.npcCount, #D.npcNames, #D.questNames, #D.itemNames))
+    say(assumed and "Flight paths: none learned yet, so I assume you have them all. Open a flight map to teach me."
+        or ("Flight paths: " .. known .. " known."))
+    local L = AskBot.Loot
+    local loot = L.status == "absent" and "not installed" or L.status == "loading" and "loading..."
+        or string.format("%d dungeons/raids, %d bosses", #L.instances, #L.bossNames)
+    say("AtlasLoot: " .. loot .. ".  Auctionator: " .. (AskBot.Prices.Available() and "yes" or "not installed") .. ".")
+    if D.status == "ready" then
+        local parts = {}
+        for _, t in ipairs(AskBot.targets) do
+            parts[#parts + 1] = t.label .. " " .. (D.byTarget[t.id] and #D.byTarget[t.id] or 0)
+        end
+        say(GREY .. table.concat(parts, ", ") .. "|r")
+    end
+end
+
+local function onSlash(msg, editBox)
+    useChatFrameOf(editBox)
+    msg = (msg or ""):match("^%s*(.-)%s*$")
+    local cmd = msg:lower()
+    if cmd == "" or cmd == "help" then
+        help()
+    elseif cmd == "clear" then
+        clearPins()
+        say("Pin cleared.")
+    elseif cmd == "status" then
+        status()
+    elseif cmd == "forget flights" then
+        AskBotCharDB.knownTaxi = {}
+        say("Forgot known flight paths.")
+    else
+        AskBot.Ask(msg)
+    end
+end
+
+function AskBot.Ask(msg)
+    if D.status == "ready" then
+        -- Report errors in chat but still hand them to the error handler, so BugSack sees them.
+        xpcall(function() answer(msg) end, function(err)
+            say("Something went wrong answering that: " .. tostring(err))
+            if geterrorhandler then geterrorhandler()(err) end
+        end)
+    elseif D.status == "failed" then
+        say("I'm not working right now; see the earlier error message.")
+    else
+        pendingQuestion = msg
+        say(string.format("Still reading Questie's data (%d%%), I'll answer in a moment.",
+            math.floor(D.progress * 100)))
+    end
+end
+
+SLASH_ASKBOT1 = "/askbot"
+SLASH_ASKBOT2 = "/ab"
+SLASH_ASKBOT3 = "/ask"
+SlashCmdList.ASKBOT = onSlash

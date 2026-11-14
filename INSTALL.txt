@@ -1,0 +1,20 @@
+AskBot - install
+================
+
+1. Make sure Questie is installed for WoW Forever (AskBot needs it).
+   Optional extras: TomTom (waypoint arrow), AtlasLoot Forever (loot and drop
+   rates), Auctionator (prices).
+
+2. Unzip this file into:
+     World of Warcraft\_forever_\Interface\AddOns\
+   so that you end up with:
+     ...\Interface\AddOns\AskBot\AskBot.toc
+
+3. Start the game (or type /reload), and make sure AskBot is ticked in the
+   AddOns list on the character screen.
+
+4. In game, type:  /ab help
+
+Updating: delete the old AddOns\AskBot folder and unzip the new one.
+Found a problem? Install BugSack + !BugGrabber to see the error, and send it
+over along with what you typed.

@@ -1,0 +1,114 @@
+# AskBot
+
+![AskBot: ask where anything is, right from chat](https://raw.githubusercontent.com/pannellmatt/AskBot/main/media/askbot-hero.png)
+
+**Ask where anything is, right from chat.**
+
+AskBot answers the questions you'd normally alt-tab to a database site for, without leaving the game. Type a question, get the nearest answer for *your* character, and click once to put a waypoint on it.
+
+```
+/ab where is my nearest skinning trainer
+AskBot: Nearest Skinning trainer:
+  Helene Peltskinner <Skinning Trainer> - Stormwind City 71.6, 62.8 (~2 min, fly Westfall > Stormwind City) [pin]
+```
+
+Built for **World of Warcraft: Forever**.
+
+---
+
+## What you can ask
+
+### Where's the nearest...?
+Profession and class trainers, weapon masters, pet trainers, flight masters, innkeepers, bankers, auctioneers, stable masters and repair vendors. Only NPCs friendly to your faction are shown.
+
+- `/ab where is my nearest skinning trainer`
+- `/ab nearest fp`
+- `/ab where's my class trainer`
+- `/ab closest inn`
+
+### Quests
+Shift-click a quest into the command, or type its name.
+
+- **A quest in your log:** the nearest place for each objective you haven't finished, then where to hand it in.
+- **A quest you don't have:** who gives it, with its level.
+
+Examples:
+- `/ab [The Defias Brotherhood]`
+- `/ab who gives Bounty on Murlocs`
+- `/ab turn in [Hilary's Necklace]`
+
+### Items
+Vendors that sell it, mobs and objects that drop it, quests that reward it, and items that contain it.
+
+- `/ab where can I buy Coarse Thread`
+- `/ab where does Linen Cloth drop`
+- `/ab where can I get [shift-clicked item]`
+
+### Dungeon loot and drop rates *(with AtlasLoot)*
+What a boss drops, with drop rates, plus a pin on the dungeon entrance.
+
+- `/ab what does VanCleef drop`
+- `/ab Deadmines loot`
+
+### Prices *(with Auctionator)*
+The auction house price, how old that price is, and what vendors pay.
+
+- `/ab price of Linen Cloth`
+- `/ab how much is [item] worth`
+
+### NPCs by name
+- `/ab where is Gryan Stoutmantle`
+
+You don't have to type names exactly. Lower case, missing apostrophes and partial names all work. When AskBot isn't sure what you meant, it offers clickable "Did you mean" suggestions.
+
+---
+
+## Nearest means quickest
+
+Answers are ranked by estimated travel time, not straight-line distance. AskBot compares walking (mounted from level 40) with taking a flight path, and tells you when flying is quicker. Open any flight master's map once and AskBot learns which flight paths your character knows, so it only plans routes you can actually take.
+
+## Waypoints
+
+Every answer has a **[pin]** link. The best answer is pinned automatically, and you can click any other one. With **TomTom** installed you get its arrow; without it, AskBot uses the game's own map pin. `/ab clear` removes the pin.
+
+---
+
+## Requirements
+
+| Addon | Required? | What it adds |
+|---|---|---|
+| **Questie** (with QuestieDB) | **Required** | All NPC, quest and item locations |
+| TomTom | Optional | Waypoint arrow |
+| AtlasLoot (Forever) | Optional | Boss loot tables, drop rates, dungeon gear |
+| Auctionator | Optional | Auction house prices |
+
+## Commands
+
+| Command | Does |
+|---|---|
+| `/askbot <question>` (also `/ab`, `/ask`) | Ask a question |
+| `/ab help` | Example questions |
+| `/ab clear` | Remove the waypoint |
+| `/ab status` | What AskBot has loaded |
+| `/ab forget flights` | Forget learned flight paths |
+
+AskBot answers in whichever chat tab you type in, so you can give it a tab of its own.
+
+---
+
+## How it works, and its limits
+
+- **No internet, no AI.** WoW addons can't go online, so AskBot reads the data your other addons already have: Questie's database for locations and quests, AtlasLoot for loot, Auctionator for prices. When those addons update, AskBot's answers improve with them.
+- **Questions are matched by keywords.** AskBot understands the kinds of questions listed above, not anything you can type.
+- **Travel times are estimates.** AskBot doesn't know about mountains or water in the way, and doesn't plan boat or zeppelin trips; places on other continents are shown as "other continent".
+- **Drop rates** come from AtlasLoot and mostly cover dungeon and raid drops. Prices are only as fresh as your last Auctionator scan.
+
+## Credits
+
+AskBot stands on the shoulders of **Questie** and **QuestieDB** (data), **HereBeDragons** (map maths), **TomTom**, **AtlasLoot** and **Auctionator**. Thanks to their authors.
+
+## License
+
+AskBot is free software under the **GNU General Public License v3** (or later); see `LICENSE.md`.
+
+*AskBot is a fan-made addon and is not affiliated with or endorsed by Blizzard Entertainment.*

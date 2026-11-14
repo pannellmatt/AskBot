@@ -1,0 +1,8 @@
+# For the CurseForge/WowUp packager, when AskBot is published from a git repository.
+package-as: AskBot
+
+ignore:
+  - tests
+  - media
+  - tools
+  - dist
