@@ -77,7 +77,22 @@ local maps = {
     [1439] = { "Darkshore", 3000, 0, 1 }, [1438] = { "Teldrassil", 3000, -2000, 1 },
     [1413] = { "The Barrens", 3000, 2000, 1 },
 }
-C_Map = { GetMapInfo = function(id) return maps[id] and { name = maps[id][1], mapType = 3 } end }
+-- The game's map pin (one at a time) and its chat link
+local userWaypoint
+UiMapPoint = { CreateFromCoordinates = function(map, x, y) return { uiMapID = map, position = { x = x, y = y } } end }
+C_Map = {
+    GetMapInfo = function(id) return maps[id] and { name = maps[id][1], mapType = 3 } end,
+    CanSetUserWaypointOnMap = function(id) return maps[id] ~= nil end,
+    SetUserWaypoint = function(p) userWaypoint = p end,
+    ClearUserWaypoint = function() userWaypoint = nil end,
+    HasUserWaypoint = function() return userWaypoint ~= nil end,
+    GetUserWaypoint = function() return userWaypoint end,
+    GetUserWaypointHyperlink = function()
+        local p = userWaypoint
+        return p and string.format("|cffffff00|Hworldmap:%d:%d:%d|h[Map Pin Location]|h|r", p.uiMapID,
+            math.floor(p.position.x * 10000 + 0.5), math.floor(p.position.y * 10000 + 0.5))
+    end,
+}
 local hbd = {
     GetWorldCoordinatesFromZone = function(_, x, y, map)
         local m = maps[map]
@@ -741,12 +756,19 @@ end)
 ask("share guild on", "guild |cff66cc33on|r")
 
 -- A guild member in Stormwind: answered from the middle of their zone, as plain chat
+-- Pins become the game's map pin links (clickable without AskBot) plus a TomTom /way command;
+-- your own map pin is put back afterwards.
 local pinsBefore = tomtomWaypoints
+local myWaypoint = UiMapPoint.CreateFromCoordinates(1436, 0.5, 0.5)
+userWaypoint = myWaypoint
 expectChat("guild: !ask nearest skinning trainer", function()
     fire("CHAT_MSG_GUILD", "!ask nearest skinning trainer", "Guildie-Realm")
-end, { "GUILD: [AskBot] Nearest Skinning trainer:", "Helene Peltskinner <Skinning Trainer> - Stormwind City 71.6, 62.8 (" },
-    { "|c", "[pin]", "AskBot:" })
+end, { "GUILD: [AskBot] Nearest Skinning trainer:", "Helene Peltskinner <Skinning Trainer> - Stormwind City 71.6, 62.8 (",
+    "|cffffff00|Hworldmap:1453:7160:6280|h[Map Pin Location]|h|r", "(/way Stormwind City 71.6 62.8)" },
+    { "|Haddon", "[pin]", "AskBot:" })
 if tomtomWaypoints ~= pinsBefore then failures = failures + 1; print("   !! FAIL: answering someone else placed a pin") end
+if userWaypoint ~= myWaypoint then failures = failures + 1; print("   !! FAIL: your own map pin wasn't put back") end
+userWaypoint = nil
 expectChat("same guild member again within the cooldown", function()
     fire("CHAT_MSG_GUILD", "!ask closest inn", "Guildie-Realm")
 end)

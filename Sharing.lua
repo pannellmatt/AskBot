@@ -94,12 +94,56 @@ end
 -- Turning AskBot's chat lines into plain chat messages
 --------------------------------------------------------------------------------------------
 
---- Strip colours, textures and AskBot's own links ([pin] etc.), keeping real item links.
+--- The game's own map pin link for a spot ("[Map Pin Location]": anyone can click it, no addon
+--- needed), or nil when the client can't make one. The game builds the link, so the server
+--- accepts it: AskBot sets a map pin for a moment, reads its link, and puts your own pin back.
+local pinLinkCache = {}
+local function mapPinLink(uiMapId, x, y)
+    local key = uiMapId .. ":" .. x .. ":" .. y
+    if pinLinkCache[key] ~= nil then return pinLinkCache[key] or nil end
+    local M = C_Map
+    if not (M and M.SetUserWaypoint and M.GetUserWaypointHyperlink and UiMapPoint and UiMapPoint.CreateFromCoordinates) then
+        return nil
+    end
+    if M.CanSetUserWaypointOnMap and not M.CanSetUserWaypointOnMap(uiMapId) then return nil end
+    local previous = M.HasUserWaypoint and M.HasUserWaypoint() and M.GetUserWaypoint and M.GetUserWaypoint()
+    local ST = C_SuperTrack
+    local tracked = ST and ST.IsSuperTrackingUserWaypoint and ST.IsSuperTrackingUserWaypoint()
+    local ok, link = pcall(function()
+        M.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(uiMapId, x / 100, y / 100))
+        return M.GetUserWaypointHyperlink()
+    end)
+    if previous then
+        pcall(M.SetUserWaypoint, previous)
+        if ST and ST.SetSuperTrackedUserWaypoint then pcall(ST.SetSuperTrackedUserWaypoint, tracked and true or false) end
+    elseif M.ClearUserWaypoint then
+        pcall(M.ClearUserWaypoint)
+    end
+    link = ok and type(link) == "string" and link:find("|Hworldmap:", 1, true) and link or nil
+    pinLinkCache[key] = link or false
+    return link
+end
+
+local function zoneName(uiMapId)
+    local info = C_Map and C_Map.GetMapInfo and C_Map.GetMapInfo(uiMapId)
+    return info and info.name
+end
+
+--- Strip colours, textures and AskBot's own links, keeping real item links. Pins become the
+--- game's map pin links, and the line's first pin also gets a TomTom "/way" command.
 function AskBot.ToChatText(line)
     local keep = {}
-    line = line:gsub("|c%x%x%x%x%x%x%x%x|Hitem:.-|h.-|h|r", function(link)
+    local function hold(link)
         keep[#keep + 1] = link
         return "\001" .. #keep .. "\002"
+    end
+    line = line:gsub("|c%x%x%x%x%x%x%x%x|Hitem:.-|h.-|h|r", hold)
+    local way
+    line = line:gsub("\003(%d+):([%d%.]+):([%d%.]+)\004", function(map, x, y)
+        map = tonumber(map)
+        if not way and zoneName(map) then way = "/way " .. zoneName(map) .. " " .. x .. " " .. y end
+        local link = mapPinLink(map, tonumber(x), tonumber(y))
+        return link and hold(link) or ""
     end)
     line = line:gsub("|Haddon:askbot:%d+|h%[(.-)%]|h", function(text)
         if text == "pin" or text == "loot" then return "" end
@@ -107,13 +151,23 @@ function AskBot.ToChatText(line)
     end)
     line = line:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|T.-|t", ""):gsub("|H.-|h(.-)|h", "%1")
     line = line:gsub("\001(%d+)\002", function(n) return keep[tonumber(n)] end)
+    if way then line = line .. " (" .. way .. ")" end
     line = line:gsub("%s+", " "):gsub("%s+([,%.%)])", "%1")
     return (line:match("^%s*(.-)%s*$"))
 end
 
+local WORLDMAP_LINK = "|c%x%x%x%x%x%x%x%x|Hworldmap:.-|h.-|h|r"
+
 local function fitLength(line)
     if #line <= MAX_LENGTH then return line end
-    -- Too long: drop item link codes (they can't be cut in half), then shorten.
+    -- Too long: links can't be cut in half. Drop map pin links from the last one back (the
+    -- /way text stays), then item link codes, then shorten.
+    while #line > MAX_LENGTH do
+        local last
+        for s, e in line:gmatch("()" .. WORLDMAP_LINK .. "()") do last = { s, e } end
+        if not last then break end
+        line = (line:sub(1, last[1] - 1) .. line:sub(last[2])):gsub("%s+", " ")
+    end
     line = line:gsub("|c%x%x%x%x%x%x%x%x|Hitem:.-|h(.-)|h|r", "%1")
     if #line > MAX_LENGTH then line = line:sub(1, MAX_LENGTH - 3) .. "..." end
     return line

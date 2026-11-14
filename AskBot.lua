@@ -114,6 +114,8 @@ local function makeLink(text, run)
 end
 
 local function pinLink(place, spawn, label)
+    -- Answering someone else: a marker that Sharing.lua turns into a map pin link and /way.
+    if AskBot.asker then return string.format("\003%d:%.1f:%.1f\004", spawn.uiMapId, spawn.x, spawn.y) end
     return makeLink("pin", function()
         if not placePin(place, spawn, label) then say("Couldn't set a pin for " .. GOLD .. place.name .. "|r.") end
     end)
