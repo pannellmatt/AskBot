@@ -157,6 +157,16 @@ function D.ResolveSpawns(spawnList)
     return out
 end
 
+--- Spawns from map points { { uiMapId, x, y }, ... } (x, y in percent).
+function D.SpawnsFromMapPoints(points)
+    local out = {}
+    for _, p in ipairs(points or {}) do
+        local wx, wy, inst = HBD:GetWorldCoordinatesFromZone(p[2] / 100, p[3] / 100, p[1])
+        out[#out + 1] = { uiMapId = p[1], x = p[2], y = p[3], wx = wx, wy = wy, inst = inst }
+    end
+    return out
+end
+
 --------------------------------------------------------------------------------------------
 -- Places: an NPC or object with resolved spawns, cached.
 --------------------------------------------------------------------------------------------

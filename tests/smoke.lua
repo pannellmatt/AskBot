@@ -157,6 +157,9 @@ local quests = {
     [120] = { "Darkshore Task 1", 1, { { 23 } }, { { 23 } }, 19, 15 }, -- across the sea
     [121] = { "Darkshore Task 2", 1, { { 23 } }, { { 23 } }, 20, 15 },
     [122] = { "Darkshore Task 3", 1, { { 23 } }, { { 23 } }, 21, 15 },
+    [124] = { "Trial of the Sea Lion", 1, { { 9 } }, { { 9 } }, 16, 16,          -- items Questie cannot place
+        { nil, nil, { { 15883 }, { 15882 } } }, nil,
+        { { { [W] = { { 30, 30 } } }, 0, "Combine the halves at the shrine" } } },
 }
 -- What Questie's IsDoable would say (completed quests, prerequisites, etc.)
 local doable = { [102] = true, [105] = true, [106] = true, [107] = true, [109] = true, [110] = true,
@@ -185,6 +188,8 @@ local items = {
     [2320] = { name = "Coarse Thread", vendors = { 12 } },
     [999] = { name = "Horde Goods", vendors = { 13 } },
     [3000] = { name = "Gryan's Medal", questRewards = { 100 } },
+    [15883] = { name = "Half Pendant of Aquatic Agility" },
+    [15882] = { name = "Half Pendant of Aquatic Endurance" },
     [4238] = { name = "Linen Bag" },
     [2570] = { name = "Linen Shirt", vendors = { 12 } },
     [2996] = { name = "Bolt of Linen Cloth" },
@@ -214,6 +219,7 @@ QuestDB = {
     requiredMaxLevel = function() return 0 end,
     objectives = function(id) return quests[id][7] end,
     triggerEnd = function(id) return quests[id][8] end,
+    extraObjectives = function(id) return quests[id][9] end,
 }
 ItemDB = { GetAllIds = function() return ids(items) end }
 for _, field in ipairs({ "name", "npcDrops", "objectDrops", "vendors", "questRewards", "itemDrops" }) do
@@ -463,7 +469,7 @@ do
 end
 -- Debug: explains the zone you're in (Westfall) and the ranking
 C_Map.GetBestMapForUnit = function() return 1436 end
-ask("zones debug", { "|cffffd100Westfall|r|cffaaaaaa: 10", "counted", "in your log", "too easy (grey)",
+ask("zones debug", { "|cffffd100Westfall|r|cffaaaaaa: 11", "counted", "in your log", "too easy (grey)",
     "How these were ranked", "of yours", "away, score" }, { "The Barrens" })
 ask("quests here", "Quests you can pick up", { "Thork", "Horde Errand" })
 ask("zones for level 14", { "Where to quest at level 14:", "Westfall|r: 2 yours + 4 new" },
@@ -483,6 +489,19 @@ faction = "Horde"
 ask("skinner please", { "Horde Skinner", "Orc Skinner|r <Skinning Trainer> - Orgrimmar", "zeppelin Grom'gol > Orgrimmar" },
     { "Helene", "other continent" })
 faction = "Alliance"
+
+-- Quest items Questie can't place: AskBot's community locations, per faction
+questLog[124] = { complete = false, objectives = {} }
+ask("[[16] Trial of the Sea Lion (124)]", { "is in progress:",
+    "Collect |cffffd100Half Pendant of Aquatic Agility|r from: |cffffd100Strange Lockbox (underwater)|r - Westfall 17.9, 33.0",
+    "Collect |cffffd100Half Pendant of Aquatic Endurance|r from: |cffffd100Strange Lockbox|r - Darkshore 48.9, 11.3",
+    "(community info)", "Do: |cffffd100Combine the halves at the shrine" }, { "doesn't know where" })
+faction = "Horde"
+ask("[[16] Trial of the Sea Lion (124)]", { "The Barrens 56.7, 8.3" }, { "Darkshore 48.9" })
+faction = "Alliance"
+ask("debug quest [[16] Trial of the Sea Lion (124)]", { "Quest 124", "collect item 15883 Half Pendant of Aquatic Agility",
+    "0 npcs, 0 objects", "has a community location", "extra: Combine the halves at the shrine, 1 spots" })
+questLog[124] = nil
 
 -- Settings and "!ask" from other players --------------------------------------------------
 local function expectChat(label, fn, expect, reject)

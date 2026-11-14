@@ -330,7 +330,25 @@ local function questObjectives(id)
     end
     for _, c in ipairs(o[3] or {}) do -- items to collect
         local drops = placesForIds(ItemDB.npcDrops(c[1]), ItemDB.objectDrops(c[1]))
-        list[#list + 1] = { "Collect", c[2] or itemName(c[1]), drops, true }
+        local community
+        if #drops == 0 then
+            -- Not placed by Questie: try items that contain it, then AskBot's own known locations.
+            for _, container in ipairs(ItemDB.itemDrops(c[1]) or {}) do
+                for _, p in ipairs(placesForIds(ItemDB.npcDrops(container), ItemDB.objectDrops(container))) do
+                    drops[#drops + 1] = p
+                end
+            end
+            local known = #drops == 0 and AskBot.KNOWN_ITEM_LOCATIONS and AskBot.KNOWN_ITEM_LOCATIONS[c[1]]
+            local points = known and (known[D.PlayerFaction() or ""] or known.N)
+            if points then
+                local spawns = D.SpawnsFromMapPoints(points)
+                if #spawns > 0 then
+                    drops[1] = { kind = "known", name = known.note or itemName(c[1]), spawns = spawns }
+                    community = true
+                end
+            end
+        end
+        list[#list + 1] = { "Collect", c[2] or itemName(c[1]), drops, true, community }
     end
     for _, c in ipairs(o[5] or {}) do -- kill credit (any of several NPCs counts)
         list[#list + 1] = { "Kill", c[3] or NpcDB.name(c[2]) or "target", placesForIds(c[1]), true }
@@ -339,6 +357,14 @@ local function questObjectives(id)
     if trigger and trigger[1] then
         local spawns = D.ResolveSpawns(trigger[2])
         list[#list + 1] = { "Go to", trigger[1], #spawns > 0 and { { kind = "area", name = trigger[1], spawns = spawns } } or {} }
+    end
+    -- Questie's hidden "extra" objectives: places to use an item, talk, look around...
+    local extras = QuestDB.extraObjectives and QuestDB.extraObjectives(id)
+    for _, e in ipairs(type(extras) == "table" and extras or {}) do
+        local spawns = type(e[1]) == "table" and D.ResolveSpawns(e[1]) or {}
+        if #spawns > 0 and e[3] then
+            list[#list + 1] = { "Do", e[3], { { kind = "area", name = e[3], spawns = spawns } } }
+        end
     end
     return list
 end
@@ -364,7 +390,7 @@ local function questTasks(id)
             end
             if not finished then
                 objectives[#objectives + 1] = {
-                    verb = obj[1], name = objName, showLevel = obj[4],
+                    verb = obj[1], name = objName, showLevel = obj[4], community = obj[5],
                     best = #obj[3] > 0 and D.Rank(obj[3])[1] or nil,
                 }
             end
@@ -380,7 +406,7 @@ local function objectiveText(o)
         return o.verb .. " " .. GOLD .. o.name .. "|r " .. GREY .. "(Questie doesn't know where)|r"
     end
     local prefix = o.verb == "Collect" and ("Collect " .. GOLD .. o.name .. "|r from: ") or (o.verb .. ": ")
-    return prefix .. describe(o.best, o.name, o.showLevel)
+    return prefix .. describe(o.best, o.name, o.showLevel) .. (o.community and (GREY .. " (community info)|r") or "")
 end
 
 local function answerQuestInLog(id, name)
@@ -1570,7 +1596,47 @@ local function status()
     end
 end
 
-local SHARE_OPTIONS = { guild = "shareGuild", party = "shareParty", raid = "shareParty", whisper = "shareWhisper",
+
+--- /ab debug quest <link or name>: what Questie's data holds for a quest's objectives.
+local function debugQuest(text)
+    local id = tonumber(text:match("|Hquest:(%d+)") or text:match("|Hquestie:(%d+)") or text:match("%((%d+)%)%]")
+        or text:match("^%s*(%d+)%s*$"))
+    if not id then
+        local plain = text:gsub("|H.-|h%[?(.-)%]?|h", "%1"):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+        plain = plain:gsub("%[%[[^%]]*%]%s*", ""):gsub("[%[%]]", "")
+        local hits = D.FindByName(D.questNames, plain)
+        id = hits and hits[1][2]
+    end
+    if not id or not QuestDB.name(id) then return say("Which quest? /ab debug quest [quest link, name or ID]") end
+
+    say("Quest " .. id .. " " .. GOLD .. QuestDB.name(id) .. "|r, level " .. tostring(QuestDB.questLevel(id)))
+    local o = QuestDB.objectives(id) or {}
+    local function count(list) return list and #list or 0 end
+    for _, c in ipairs(o[1] or {}) do
+        local p = D.NpcPlace(c[1])
+        say("  kill npc " .. c[1] .. " " .. tostring(p and p.name) .. ": " .. (p and #p.spawns or 0) .. " spawns")
+    end
+    for _, c in ipairs(o[2] or {}) do
+        local p = D.ObjectPlace(c[1])
+        say("  use object " .. c[1] .. " " .. tostring(p and p.name) .. ": " .. (p and #p.spawns or 0) .. " spawns")
+    end
+    for _, c in ipairs(o[3] or {}) do
+        say("  collect item " .. c[1] .. " " .. itemName(c[1]) .. ": dropped by " .. count(ItemDB.npcDrops(c[1]))
+            .. " npcs, " .. count(ItemDB.objectDrops(c[1])) .. " objects, inside " .. count(ItemDB.itemDrops(c[1]))
+            .. " items" .. (AskBot.KNOWN_ITEM_LOCATIONS[c[1]] and ", has a community location" or ""))
+    end
+    for _, c in ipairs(o[5] or {}) do
+        say("  kill credit " .. tostring(c[2]) .. " from " .. count(c[1]) .. " npcs")
+    end
+    local trigger = QuestDB.triggerEnd(id)
+    if trigger then say("  explore: " .. tostring(trigger[1]) .. ", " .. #D.ResolveSpawns(trigger[2]) .. " spots") end
+    local extras = QuestDB.extraObjectives and QuestDB.extraObjectives(id)
+    for _, e in ipairs(type(extras) == "table" and extras or {}) do
+        say("  extra: " .. tostring(e[3]) .. ", " .. #D.ResolveSpawns(e[1]) .. " spots")
+    end
+end
+
+local SHARE_OPTIONS ={ guild = "shareGuild", party = "shareParty", raid = "shareParty", whisper = "shareWhisper",
     whispers = "shareWhisper" }
 
 --- /ab share [guild|party|whisper] [on|off]
@@ -1615,6 +1681,9 @@ local function onSlash(msg, editBox)
         end
     elseif cmd:match("^share") then
         shareCommand(cmd)
+    elseif cmd:match("^debug quest") then
+        if D.status ~= "ready" then return say("Still loading, try again in a moment.") end
+        debugQuest(msg:sub(12))
     else
         AskBot.Ask(msg)
     end
@@ -1635,6 +1704,7 @@ function AskBot.Ask(msg)
             math.floor(D.progress * 100)))
     end
 end
+
 
 --- Questions only the asker's own AskBot can answer (they need their quest log).
 function AskBot.IsPersonalQuestion(question)

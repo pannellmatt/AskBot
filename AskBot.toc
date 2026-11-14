@@ -10,6 +10,7 @@
 ## SavedVariablesPerCharacter: AskBotCharDB
 
 Queries.lua
+KnownLocations.lua
 Options.lua
 Data.lua
 Integrations.lua

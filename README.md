@@ -145,6 +145,7 @@ AskBot answers in whichever chat tab you type in, so you can give it a tab of it
 - **Questions are matched by keywords.** AskBot understands the kinds of questions listed above, not anything you can type.
 - **Travel times are estimates.** AskBot doesn't know about mountains or water in the way, and uses average waiting times for boats and zeppelins.
 - **Drop rates** come from AtlasLoot and mostly cover dungeon and raid drops. Prices are only as fresh as your last Auctionator scan.
+- **Gaps in Questie's data.** A few quest items aren't placed by Questie (for example the Trial of the Sea Lion pendant halves). AskBot fills known gaps from public sources, marked *(community info)*, in `KnownLocations.lua`. If you find another, `/ab debug quest [quest link]` shows what Questie has for it. Open an issue with that output and the right location, and it can be added.
 
 ## Credits
 
