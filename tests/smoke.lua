@@ -130,6 +130,7 @@ local npcs = {
     [22] = { "Jannok Breezesong", nil, 0, "A", { [TD] = { { 56, 60 } } } },
     [23] = { "Auberdine Quester", nil, 2, "A", { [DS] = { { 37, 44 } } } },
     [24] = { "Thork", nil, 2, "H", { [BAR] = { { 51, 30 } } } },                -- Horde quest giver
+    [25] = { "Chain Giver", nil, 2, "A", { [DM] = { { 40, 40 } } } },
 }
 local quests = {
     [100] = { "The Defias Brotherhood", 1, { { 9 } }, { { 9 } }, 18, 14 },
@@ -157,6 +158,14 @@ local quests = {
     [120] = { "Darkshore Task 1", 1, { { 23 } }, { { 23 } }, 19, 15 }, -- across the sea
     [121] = { "Darkshore Task 2", 1, { { 23 } }, { { 23 } }, 20, 15 },
     [122] = { "Darkshore Task 3", 1, { { 23 } }, { { 23 } }, 21, 15 },
+    [130] = { "Chain Part 1", 1, { { 25 } }, { { 25 } }, 14, 10 },
+    [131] = { "Chain Part 2", 1, { { 25 } }, { { 25 } }, 16, 12 },
+    [132] = { "Chain Part 3", 1, { { 25 } }, { { 25 } }, 18, 15 },
+    [133] = { "Side Errand", 1, { { 25 } }, { { 25 } }, 15, 12 },
+    [134] = { "Horde Version", 2, { { 24 } }, { { 24 } }, 14, 10 },
+    [135] = { "Done Earlier", 1, { { 25 } }, { { 25 } }, 12, 10 },
+    [136] = { "After Done", 1, { { 25 } }, { { 25 } }, 13, 10 },
+    [137] = { "Lead-in", 1, { { 25 } }, { { 25 } }, 12, 10 },
     [124] = { "Trial of the Sea Lion", 1, { { 9 } }, { { 9 } }, 16, 16,          -- items Questie cannot place
         { nil, nil, { { 15883 }, { 15882 } } }, nil,
         { { { [W] = { { 30, 30 } } }, 0, "Combine the halves at the shrine" } } },
@@ -173,7 +182,15 @@ local questLog = {
         { text = "Linen Cloth: 2/6", finished = false } } },
     [104] = { complete = false, objectives = { { text = "Scout the Redridge camp", finished = false } } },
 }
+-- Quest chains: 132 needs all of {131, 133}; 131 needs any one of {130, 134 (Horde only)};
+-- 136 follows 135, which is done; 137 is an optional lead-in to 132.
+local chain = {
+    [131] = { single = { 130, 134 } }, [132] = { group = { 131, 133 }, crumbs = { 137 } },
+    [136] = { single = { 135 } }, [130] = { nextQuest = 131 },
+}
+local completed = { [135] = true }
 C_QuestLog = {
+    IsQuestFlaggedCompleted = function(id) return completed[id] == true end,
     GetLogIndexForQuestID = function(id) return questLog[id] and 1 or nil end,
     IsComplete = function(id) return questLog[id] and questLog[id].complete or false end,
     GetQuestObjectives = function(id) return questLog[id] and questLog[id].objectives end,
@@ -220,6 +237,10 @@ QuestDB = {
     objectives = function(id) return quests[id][7] end,
     triggerEnd = function(id) return quests[id][8] end,
     extraObjectives = function(id) return quests[id][9] end,
+    preQuestSingle = function(id) return chain[id] and chain[id].single end,
+    preQuestGroup = function(id) return chain[id] and chain[id].group end,
+    nextQuestInChain = function(id) return chain[id] and chain[id].nextQuest end,
+    breadcrumbs = function(id) return chain[id] and chain[id].crumbs end,
 }
 ItemDB = { GetAllIds = function() return ids(items) end }
 for _, field in ipairs({ "name", "npcDrops", "objectDrops", "vendors", "questRewards", "itemDrops" }) do
@@ -502,6 +523,21 @@ faction = "Alliance"
 ask("debug quest [[16] Trial of the Sea Lion (124)]", { "Quest 124", "collect item 15883 Half Pendant of Aquatic Agility",
     "0 npcs, 0 objects", "has a community location", "extra: Combine the halves at the shrine, 1 spots" })
 questLog[124] = nil
+
+-- Quest chains (Questie would say Part 1, Side Errand, After Done and Lead-in can be taken now)
+for _, id in ipairs({ 130, 133, 136, 137 }) do doable[id] = true end
+ask("what do i need before chain part 3", { "To get ", "Chain Part 3", "first:",
+    "1. |cffffd100[14] Chain Part 1|r - pick up from |cffffd100Chain Giver",
+    "2. |cffffd100[16] Chain Part 2|r - |cffaaaaaaafter the step above",
+    "3. |cffffd100[15] Side Errand|r - pick up from", "Optional lead-in:|r |cffffd100[12] Lead-in" },
+    { "Horde Version" })
+ask("[[16] Chain Part 2 (131)] prereqs", { "To get ", "1. |cffffd100[14] Chain Part 1|r - pick up" }, { "Side Errand" })
+ask("how do i unlock side errand", { "[15] Side Errand|r is ready to pick up from |cffffd100Chain Giver" })
+ask("what comes after chain part 1", { "After ", "Chain Part 1", "Chain Part 2|r - |cffaaaaaaopens when you finish it" })
+ask("what comes after done earlier", { "After ", "[13] After Done|r - pick up from |cffffd100Chain Giver" })
+ask("what do i need before done earlier", "You've already done")
+ask("what comes after chain part 3", "Nothing follows")
+for _, id in ipairs({ 130, 133, 136, 137 }) do doable[id] = nil end
 
 -- Settings and "!ask" from other players --------------------------------------------------
 local function expectChat(label, fn, expect, reject)

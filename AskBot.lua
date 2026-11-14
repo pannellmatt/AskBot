@@ -1226,10 +1226,222 @@ local function answerRares()
 end
 
 --------------------------------------------------------------------------------------------
+-- Quest chains: what comes before and after a quest
+--------------------------------------------------------------------------------------------
+
+--- done | inLog | level | ready | locked, for this character.
+local function questStatus(id, inLog)
+    local isCompleted = (C_QuestLog and C_QuestLog.IsQuestFlaggedCompleted) or IsQuestFlaggedCompleted
+    if isCompleted and isCompleted(id) then return "done" end
+    if inLog[id] then return "inLog" end
+    if (QuestDB.requiredLevel(id) or 0) > askerLevel() then return "level" end
+    local QuestieDBModule = QuestieLoader and QuestieLoader:ImportModule("QuestieDB")
+    if QuestieDBModule and QuestieDBModule.IsDoable then
+        local ok, doable = pcall(QuestieDBModule.IsDoable, id)
+        if ok and doable then return "ready" end
+    end
+    return "locked"
+end
+
+--- Could this character ever take the quest? (Race rules, and a giver that isn't hostile.)
+local function questForMe(id)
+    if not questAvailable(id) then return false end
+    local by = QuestDB.startedBy(id) or {}
+    if (by[2] and #by[2] > 0) or (by[3] and #by[3] > 0) or not (by[1] and #by[1] > 0) then return true end
+    local mine = D.PlayerFaction()
+    for _, npc in ipairs(by[1]) do
+        local f = NpcDB.friendlyToFaction(npc)
+        if f and mine and f:find(mine, 1, true) then return true end
+    end
+    return false
+end
+
+local STATUS_ORDER = { inLog = 1, ready = 2, level = 3, locked = 4, done = 5 }
+
+--- The quests still to do before `id`, earliest first, ending with `id` itself.
+--- For "any one of" prerequisites, follows the one you're closest to.
+local function missingSteps(id, inLog, seen, out, depth)
+    seen[id] = true
+    if depth < 20 then
+        for _, pre in ipairs(QuestDB.preQuestGroup(id) or {}) do -- all of these
+            if pre > 0 and not seen[pre] and questForMe(pre) and questStatus(pre, inLog) ~= "done" then
+                missingSteps(pre, inLog, seen, out, depth + 1)
+            end
+        end
+        local options, anyDone = {}, false -- any one of these
+        for _, pre in ipairs(QuestDB.preQuestSingle(id) or {}) do
+            if pre > 0 and questForMe(pre) then
+                local status = questStatus(pre, inLog)
+                if status == "done" then anyDone = true end
+                options[#options + 1] = { id = pre, order = STATUS_ORDER[status] }
+            end
+        end
+        if not anyDone and #options > 0 then
+            table.sort(options, function(a, b) return a.order < b.order end)
+            if not seen[options[1].id] then missingSteps(options[1].id, inLog, seen, out, depth + 1) end
+        end
+    end
+    out[#out + 1] = id
+    return out
+end
+
+--- "pick up from Gryan Stoutmantle, 68 yds [pin]", with the result for pinning.
+local function giverText(id)
+    local by = QuestDB.startedBy(id) or {}
+    local best = D.Rank(placesForIds(by[1], by[2], true))[1]
+    if best then
+        return "from " .. GOLD .. best.place.name .. "|r, " .. shortHow(best) .. " " .. pinLink(best.place, best.spawn, QuestDB.name(id)), best
+    end
+    if by[3] and by[3][1] then return "starts from the item " .. GOLD .. itemName(by[3][1]) .. "|r" end
+    return GREY .. "giver unknown|r"
+end
+
+local function stepText(id, status)
+    if status == "done" then return "|cff66cc33done|r" end
+    if status == "inLog" then return "in your log" end
+    if status == "level" then return "needs level " .. (QuestDB.requiredLevel(id) or "?") .. ", " .. (giverText(id)) end
+    if status == "ready" then return "pick up " .. (giverText(id)) end
+    return GREY .. "after the step above|r"
+end
+
+--- Choose among quests sharing a name: for "before", one you haven't done; for "after",
+--- the furthest one you've done or have.
+local function pickQuest(hits, after)
+    local inLog = {}
+    for _, q in ipairs(questLogEntries()) do inLog[q.id] = true end
+    local best, bestScore
+    for _, e in ipairs(hits) do
+        local id = e[2]
+        if questForMe(id) then
+            local status = questStatus(id, inLog)
+            local level = QuestDB.questLevel(id) or 0
+            local score
+            if after then
+                score = (status == "done" or status == "inLog") and (1000 + level) or -level
+            else
+                score = (status ~= "done") and (1000 - level) or -level
+            end
+            if not bestScore or score > bestScore then best, bestScore = id, score end
+        end
+    end
+    return best, inLog
+end
+
+local function resolveQuest(query, questId, after)
+    if questId then
+        local inLog = {}
+        for _, q in ipairs(questLogEntries()) do inLog[q.id] = true end
+        return questId, inLog
+    end
+    local hits = D.FindByName(D.questNames, query)
+    if not hits then return nil end
+    return pickQuest(hits, after)
+end
+
+--- "What do I need before X?" / "How do I unlock X?"
+local function answerChain(query, questId)
+    if AskBot.asker then return say("That depends on which quests you've done, so it needs your own AskBot.") end
+    local id, inLog = resolveQuest(query, questId, false)
+    if not id then return say("I couldn't find a quest called \"" .. tostring(query) .. "\" for you.") end
+    local name = QuestDB.name(id) or ("quest " .. id)
+    local status = questStatus(id, inLog)
+
+    if status == "done" then
+        return say("You've already done " .. questLabel(id) .. ". " .. GREY .. "(/ab what comes after " .. name .. ")|r")
+    end
+    if status == "inLog" then
+        return answerQuestInLog(id, name)
+    end
+
+    local steps = missingSteps(id, inLog, {}, {}, 0)
+    if #steps == 1 then
+        local text, best = giverText(id)
+        if status == "ready" then
+            say(questLabel(id) .. " is ready to pick up " .. text)
+        elseif status == "level" then
+            say(questLabel(id) .. " needs level " .. (QuestDB.requiredLevel(id) or "?") .. ". It's " .. text)
+        else
+            say(questLabel(id) .. " has no earlier quests left that Questie knows of, but isn't available to you yet"
+                .. " (it may need a reputation, a profession or another class). It's " .. text)
+        end
+        if best then autoPin(best.place, best.spawn, name) end
+        return
+    end
+
+    say("To get " .. questLabel(id) .. ", first:")
+    local shown, firstPin = 0, nil
+    for i = 1, #steps - 1 do
+        local s = steps[i]
+        local st = questStatus(s, inLog)
+        if shown < 6 then
+            say("  " .. i .. ". " .. questLabel(s) .. " - " .. stepText(s, st))
+            shown = shown + 1
+        end
+        if not firstPin and st == "ready" then
+            local _, best = giverText(s)
+            firstPin = best
+        end
+    end
+    if #steps - 1 > shown then say(GREY .. "  ...and " .. (#steps - 1 - shown) .. " more steps.|r") end
+    local crumbs = {}
+    for _, b in ipairs(QuestDB.breadcrumbs and QuestDB.breadcrumbs(id) or {}) do
+        if questForMe(b) and questStatus(b, inLog) ~= "done" then crumbs[#crumbs + 1] = questLabel(b) end
+    end
+    if #crumbs > 0 then say(GREY .. "  Optional lead-in:|r " .. table.concat(crumbs, ", ")) end
+    if firstPin then autoPin(firstPin.place, firstPin.spawn, "first step") end
+end
+
+--- "What comes after X?"
+local function answerAfter(query, questId)
+    if AskBot.asker then return say("That depends on which quests you've done, so it needs your own AskBot.") end
+    local id, inLog = resolveQuest(query, questId, true)
+    if not id then return say("I couldn't find a quest called \"" .. tostring(query) .. "\" for you.") end
+
+    local nexts, seen = {}, {}
+    local function add(n)
+        if n and n > 0 and n ~= id and not seen[n] and questForMe(n) then seen[n] = true; nexts[#nexts + 1] = n end
+    end
+    add(QuestDB.nextQuestInChain and QuestDB.nextQuestInChain(id))
+    for _, n in ipairs(D.unlocks[id] or {}) do add(n) end
+    if #nexts == 0 then return say("Nothing follows " .. questLabel(id) .. ", as far as Questie knows.") end
+    table.sort(nexts, function(a, b) return (QuestDB.questLevel(a) or 0) < (QuestDB.questLevel(b) or 0) end)
+
+    say("After " .. questLabel(id) .. ":")
+    local pinned
+    for i = 1, math.min(5, #nexts) do
+        local n = nexts[i]
+        local st = questStatus(n, inLog)
+        local text = stepText(n, st)
+        if st == "locked" then
+            -- Say what else it's waiting for.
+            local steps = missingSteps(n, inLog, { [id] = true }, {}, 0)
+            text = #steps > 1 and ("also needs " .. questLabel(steps[1])) or (GREY .. "opens when you finish it|r")
+        end
+        say("  " .. questLabel(n) .. " - " .. text)
+        if not pinned and st == "ready" then
+            local _, best = giverText(n)
+            pinned = best
+        end
+    end
+    if #nexts > 5 then say(GREY .. "  ...and " .. (#nexts - 5) .. " more.|r") end
+    if pinned then autoPin(pinned.place, pinned.spawn, "next quest") end
+end
+
+--------------------------------------------------------------------------------------------
 -- Understanding the question
 --------------------------------------------------------------------------------------------
 
 local INTENTS = {
+    { "chain", {
+        "^how do i unlock (.+)$", "^how to unlock (.+)$", "^how do i get to (.+)$", "^unlock (.+)$",
+        "^why cant i get (.+)$", "^why can i not get (.+)$", "^why dont i have (.+)$", "^what do i need for (.+)$",
+        "^what do i need to do before (.+)$", "^what do i need before (.+)$", "^what comes before (.+)$",
+        "^what is before (.+)$", "^before (.+)$", "^prerequisites? for (.+)$", "^prereqs? for (.+)$",
+        "^requirements for (.+)$", "^chain for (.+)$", "^quest chain for (.+)$", "^(.+) prerequisites?$",
+        "^(.+) prereqs?$", "^(.+) chain$" } },
+    { "after", {
+        "^what comes after (.+)$", "^what is after (.+)$", "^what is next after (.+)$", "^next after (.+)$",
+        "^what follows (.+)$", "^what does (.+) unlock$", "^what does (.+) lead to$", "^after (.+)$" } },
     { "loot", {
         "^what does (.+) drop$", "^what do (.+) drop$", "^what drops in (.+)$", "^what drops from (.+)$",
         "^what can i get from (.+)$", "^loot from (.+)$", "^drops from (.+)$", "^loot (.+)$",
@@ -1364,6 +1576,8 @@ local function answer(question)
     end
 
     if questId then
+        if intent == "chain" then return answerChain(nil, tonumber(questId)) end
+        if intent == "after" then return answerAfter(nil, tonumber(questId)) end
         return answerQuest(nil, intent == "questEnd" and "end" or intent == "questStart" and "start" or "auto", { tonumber(questId) })
     end
     if itemId then
@@ -1396,7 +1610,11 @@ local function answer(question)
         end
     end
 
-    if intent == "loot" then
+    if intent == "chain" then
+        return answerChain(subject)
+    elseif intent == "after" then
+        return answerAfter(subject)
+    elseif intent == "loot" then
         return answerLoot(subject)
     elseif intent == "price" then
         return answerPrice(subject)
@@ -1565,6 +1783,7 @@ local function help()
     say("  /askbot where can I buy Coarse Thread    /askbot where does Linen Cloth drop")
     say("  /askbot where is Gryan Stoutmantle    /askbot [shift-click an item or quest]")
     say("  /askbot what does VanCleef drop    /askbot Deadmines loot    /askbot price of Linen Cloth")
+    say("  /askbot what do I need before [quest]    /askbot what comes after [quest]")
     say("Click " .. "|cff71d5ff[pin]|r" .. " on any answer to put a pin on it.")
     say("/askbot clear - remove the pin.  /askbot status - index info.  Also /ab and /ask.")
     say("/askbot refresh prices - re-check prices you've asked about (now at the AH, or on your next visit).")

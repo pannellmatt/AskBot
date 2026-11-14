@@ -14,6 +14,7 @@ local D = {
     itemIds = {},       -- item IDs present in itemNames
     npcNames = {},
     questInfo = {},     -- quest id -> { level, req, max, npcs, objects } for quests with a giver
+    unlocks = {},       -- quest id -> quests that list it as a prerequisite
     rares = {},         -- npc id -> rank (2 = rare elite, 4 = rare)
 }
 AskBot.Data = D
@@ -291,6 +292,16 @@ function D.BuildIndex()
                 level = QuestDB.questLevel(id), req = QuestDB.requiredLevel(id),
                 max = QuestDB.requiredMaxLevel(id), npcs = npcs, objects = objects,
             }
+        end
+        -- Reverse the prerequisite links, for "what comes after X?"
+        for _, field in ipairs({ "preQuestSingle", "preQuestGroup" }) do
+            for _, pre in ipairs(QuestDB[field] and QuestDB[field](id) or {}) do
+                if pre > 0 then
+                    local list = D.unlocks[pre]
+                    if not list then list = {}; D.unlocks[pre] = list end
+                    list[#list + 1] = id
+                end
+            end
         end
         step()
     end
