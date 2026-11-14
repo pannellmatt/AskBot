@@ -73,11 +73,40 @@ You don't have to type names exactly. Lower case, missing apostrophes and partia
 
 ## Nearest means quickest
 
-Answers are ranked by estimated travel time, not straight-line distance. AskBot compares walking (mounted from level 40) with taking a flight path, and tells you when flying is quicker. Open any flight master's map once and AskBot learns which flight paths your character knows, so it only plans routes you can actually take.
+Answers are ranked by estimated travel time, not straight-line distance. AskBot compares walking (mounted from level 40) with flight paths, boats and zeppelins, and spells out the route when it isn't just a walk:
+
+```
+Jannok Breezesong - Teldrassil 56.0, 60.0 (~10 min, fly Westfall > Stormwind City,
+  boat Stormwind Harbor > Auberdine, boat Auberdine > Rut'theran Village) [pin]
+```
+
+Open any flight master's map once and AskBot learns which flight paths your character knows, so it only plans routes you can actually take.
 
 ## Waypoints
 
-Every answer has a **[pin]** link. The best answer is pinned automatically, and you can click any other one. With **TomTom** installed you get its arrow; without it, AskBot uses the game's own map pin. `/ab clear` removes the pin.
+Every answer has a **[pin]** link. The best answer is pinned automatically (you can turn that off), and you can click any other one. With **TomTom** installed you get its arrow; without it, AskBot uses the game's own map pin. `/ab clear` removes the pin.
+
+## Let friends ask too
+
+Friends don't need AskBot themselves. Switch sharing on (`/ab share guild on`, or `party` / `whisper`) and anyone can type in guild or party chat:
+
+```
+!ask where's the nearest flight master
+[AskBot] Nearest Flight master:
+Thor <Gryphon Master> - Westfall 56.6, 52.6 (71 yds, <1 min)
+```
+
+- **Where they are:** answers are worked out from the asker's position (exact for group members, their zone for guild members) and their class, so "my class trainer" means *their* class.
+- **No spam:** it's off by default, answers are at most four lines, and there's a cooldown per person.
+- **Several AskBots:** when more than one guild member runs AskBot, only one of them answers.
+- **Quest log questions:** "what's next" and "quests here" need the asker's own quest log, so they only work with `/ab`.
+
+## Settings
+
+`/ab options` opens AskBot's page in the game's Settings, under AddOns:
+- whether to pin the best answer automatically
+- how many results to list (1-5)
+- which chats friends can `!ask` in
 
 ---
 
@@ -101,6 +130,8 @@ Every answer has a **[pin]** link. The best answer is pinned automatically, and 
 | `/ab forget flights` | Forget learned flight paths |
 | `/ab refresh prices` | Re-check the prices you've asked about (needs Auctionator) |
 | `/ab forget prices` | Clear that price list |
+| `/ab options` | Settings |
+| `/ab share` | Who can ask with `!ask` (`/ab share guild on`, `party`, `whisper`; `on`/`off`) |
 
 AskBot answers in whichever chat tab you type in, so you can give it a tab of its own.
 
@@ -110,7 +141,7 @@ AskBot answers in whichever chat tab you type in, so you can give it a tab of it
 
 - **No internet, no AI.** WoW addons can't go online, so AskBot reads the data your other addons already have: Questie's database for locations and quests, AtlasLoot for loot, Auctionator for prices. When those addons update, AskBot's answers improve with them.
 - **Questions are matched by keywords.** AskBot understands the kinds of questions listed above, not anything you can type.
-- **Travel times are estimates.** AskBot doesn't know about mountains or water in the way, and doesn't plan boat or zeppelin trips; places on other continents are shown as "other continent".
+- **Travel times are estimates.** AskBot doesn't know about mountains or water in the way, and uses average waiting times for boats and zeppelins.
 - **Drop rates** come from AtlasLoot and mostly cover dungeon and raid drops. Prices are only as fresh as your last Auctionator scan.
 
 ## Credits

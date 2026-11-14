@@ -12,8 +12,13 @@ local GOLD, GREY = "|cffffd100", "|cffaaaaaa"
 -- Answers go to the chat window the last /askbot was typed in (remembered per character),
 -- falling back to the default chat window.
 local outputFrame
+local outputSink -- when answering someone else in chat, lines are collected here instead
 
 local function say(msg)
+    if outputSink then
+        outputSink[#outputSink + 1] = msg
+        return
+    end
     local frame = outputFrame
     if not frame and AskBotCharDB and AskBotCharDB.chatFrame then
         frame = _G["ChatFrame" .. AskBotCharDB.chatFrame]
@@ -32,6 +37,17 @@ end
 
 local targetsById = {}
 for _, t in ipairs(AskBot.targets) do targetsById[t.id] = t end
+
+-- Who's asking: AskBot.asker is set while answering someone else's "!ask" in chat.
+local function askerClass()
+    if AskBot.asker and AskBot.asker.class then return AskBot.asker.class end
+    local _, classFile = UnitClass("player")
+    return classFile
+end
+
+local function askerLevel()
+    return (AskBot.asker and AskBot.asker.level) or UnitLevel("player") or 1
+end
 
 local pendingQuestion -- asked before the index was ready
 
@@ -79,6 +95,13 @@ local function placePin(place, spawn, label)
         end)
         if ok then return "map pin set" end
     end
+end
+
+--- Pins placed by answers (not clicks): only for your own questions, and only when the
+--- "Pin the best answer" setting is on.
+local function autoPin(place, spawn, label)
+    if AskBot.asker or not AskBot.Option("autoPin") then return end
+    placePin(place, spawn, label)
 end
 
 -- Clickable chat links: each stores a function to run when clicked.
@@ -135,9 +158,8 @@ local function whereText(r, label)
     local p, s = r.place, r.spawn
     local where = string.format("%s %.1f, %.1f", D.ZoneName(s.uiMapId), s.x, s.y)
     local how
-    if r.route then
-        how = string.format(" (%s, fly %s > %s)", formatTime(r.time),
-            D.ZoneName(r.route.from.uiMapId), D.ZoneName(r.route.to.uiMapId))
+    if r.time and r.steps and #r.steps > 0 then
+        how = " (" .. formatTime(r.time) .. ", " .. D.RouteText(r.steps) .. ")"
     elseif r.dist then
         how = string.format(" (%s, %s)", formatYards(r.dist), formatTime(r.time))
     else
@@ -178,13 +200,13 @@ local function showRanked(places, heading, label, max, opts)
         say("  " .. describe(results[i], label, opts.showLevel, opts.extra))
     end
     if not havePosition then
-        say(GREY .. "  (I can't read your position here, so these aren't sorted by distance.)|r")
+        say(GREY .. "  (No position known, so these aren't sorted by distance.)|r")
     end
     return results[1]
 end
 
 local function pinBest(best, label)
-    if best then placePin(best.place, best.spawn, label) end
+    if best then autoPin(best.place, best.spawn, label) end
 end
 
 --- Offer alternative names as links; clicking one asks `template` (a format string) again.
@@ -219,7 +241,7 @@ local function answerTarget(target)
         say("I couldn't find a " .. target.label .. " friendly to you.")
         return
     end
-    local best = showRanked(places, "Nearest " .. target.label .. ":", target.label, 3)
+    local best = showRanked(places, "Nearest " .. target.label .. ":", target.label, AskBot.Option("maxResults"))
     pinBest(best, target.label)
 end
 
@@ -365,7 +387,7 @@ local function answerQuestInLog(id, name)
     end
 
     local target = (complete or not nearest) and turnIn or nearest
-    if target then placePin(target.place, target.spawn, name) end
+    if target then autoPin(target.place, target.spawn, name) end
 end
 
 --- mode: "start", "end" or "auto" (a quest in your log shows its progress, else its start).
@@ -473,7 +495,7 @@ local function answerItem(query, mode, hits, others)
         local vendors = placesForIds(collectItem(hits, "vendors"), nil, true)
         if #vendors > 0 then
             anything = true
-            best = showRanked(vendors, GOLD .. name .. "|r is sold by:", name, mode == "buy" and 3 or 2,
+            best = showRanked(vendors, GOLD .. name .. "|r is sold by:", name, mode == "buy" and AskBot.Option("maxResults") or 2,
                 { countNoun = "vendors" })
         elseif mode == "buy" then
             say("No vendor friendly to you sells " .. GOLD .. name .. "|r, as far as Questie knows.")
@@ -493,7 +515,7 @@ local function answerItem(query, mode, hits, others)
         end
         if #droppers > 0 then
             anything, shownDrops = true, true
-            local b = showRanked(droppers, GOLD .. name .. "|r drops from:", name, 3, {
+            local b = showRanked(droppers, GOLD .. name .. "|r drops from:", name, AskBot.Option("maxResults"), {
                 showLevel = true, countNoun = "sources",
                 extra = function(place)
                     local r = rateFor(place)
@@ -515,7 +537,7 @@ local function answerItem(query, mode, hits, others)
             anything = true
             table.sort(bossSources, function(a, b) return (a.rate or -1) > (b.rate or -1) end)
             say(#droppers > 0 and "  also from:" or (GOLD .. name .. "|r drops from:"))
-            for i = 1, math.min(3, #bossSources) do
+            for i = 1, math.min(AskBot.Option("maxResults"), #bossSources) do
                 local src = bossSources[i]
                 if src.rate then ratesShown = true end
                 local line = "  " .. GOLD .. src.boss.name .. "|r" .. formatRate(src.rate) .. " - " .. src.boss.instance.name
@@ -574,7 +596,7 @@ local function answerNpcName(hits, others)
         say("Questie doesn't know where " .. GOLD .. hits[1][3] .. "|r is.")
         return
     end
-    local best = showRanked(places, nil, nil, 3, { showLevel = true })
+    local best = showRanked(places, nil, nil, AskBot.Option("maxResults"), { showLevel = true })
     didYouMean(others, "where is %s")
     pinBest(best)
 end
@@ -610,7 +632,7 @@ local function sayEntrance(instance)
     local r = entrance and D.Rank({ entrance })[1]
     if r then
         say("  Entrance: " .. whereText(r, instance.name))
-        placePin(r.place, r.spawn, instance.name)
+        autoPin(r.place, r.spawn, instance.name)
     end
 end
 
@@ -709,6 +731,7 @@ local function answerPrice(query, hits)
     didYouMean(others, "price of %s")
     if not P.Available() then return say(priceLine(id)) end
 
+    if AskBot.asker then return say(priceLine(id)) end -- someone else asking: last known price
     P.Watch(id) -- remembered for /ab refresh prices
     if not P.IsAHOpen() then return say(priceLine(id)) end
 
@@ -835,14 +858,14 @@ local function answerWhatsNext()
         say(GREY .. "  (" .. unknown .. " complete quest" .. (unknown == 1 and "" or "s") .. " with no known turn-in.)|r")
     end
     local first = turnIns[1] or objectives[1]
-    if first then placePin(first.r.place, first.r.spawn, first.name) end
+    if first then autoPin(first.r.place, first.r.spawn, first.name) end
 end
 
 local function answerQuestsHere()
     local QuestieDBModule = QuestieLoader and QuestieLoader:ImportModule("QuestieDB")
     local isDoable = QuestieDBModule and QuestieDBModule.IsDoable
     local isTrivial = QuestieDBModule and QuestieDBModule.IsTrivial
-    local level = UnitLevel("player") or 1
+    local level = askerLevel()
     local inLog = {}
     for _, q in ipairs(questLogEntries()) do inLog[q.id] = true end
 
@@ -861,7 +884,7 @@ local function answerQuestsHere()
             end
             if doable then
                 local best = D.Rank(placesForIds(info.npcs, info.objects))[1]
-                if best and best.time then
+                if best and best.dist then -- same continent only
                     local key = best.place.kind .. best.place.id
                     local g = groups[key]
                     if not g then g = { r = best, quests = {} }; groups[key] = g end
@@ -891,12 +914,12 @@ local function answerQuestsHere()
         say("  " .. describe(g.r, "quests"))
         say("      " .. table.concat(names, ", "))
     end
-    placePin(list[1].r.place, list[1].r.spawn, "quests")
+    autoPin(list[1].r.place, list[1].r.spawn, "quests")
 end
 
 local function answerDungeons(level)
     if lootUnavailable() then return end
-    level = level or UnitLevel("player") or 1
+    level = level or askerLevel()
     local fits = {}
     for _, inst in ipairs(AskBot.Loot.instances) do
         local range = inst.levelRange
@@ -921,7 +944,7 @@ local function answerDungeons(level)
             .. (r and (" - entrance " .. whereText(r, inst.name)) or ""))
         if r and not pinned then pinned = r end
     end
-    if pinned then placePin(pinned.place, pinned.spawn, pinned.place.name) end
+    if pinned then autoPin(pinned.place, pinned.spawn, pinned.place.name) end
 end
 
 local function answerRares()
@@ -931,7 +954,7 @@ local function answerRares()
         if p and #p.spawns > 0 then places[#places + 1] = p end
     end
     if #places == 0 then return say("Questie doesn't list any rare mobs.") end
-    local best = showRanked(places, "Rare mobs nearest you:", "rare", 5, {
+    local best = showRanked(places, "Rare mobs nearest you:", "rare", AskBot.Option("maxResults") + 2, {
         showLevel = true,
         extra = function(p) return " |cffc0c0c0(" .. (D.rares[p.id] == 2 and "rare elite" or "rare") .. ")|r" end,
     })
@@ -1034,7 +1057,7 @@ local function findTarget(q)
     end
     for _, key in ipairs(AskBot.classTrainerKeys) do
         if hasKey(q, key) then
-            local _, classFile = UnitClass("player")
+            local classFile = askerClass()
             return targetsById[classFile]
         end
     end
@@ -1262,6 +1285,7 @@ local function help()
     say("Click " .. "|cff71d5ff[pin]|r" .. " on any answer to put a pin on it.")
     say("/askbot clear - remove the pin.  /askbot status - index info.  Also /ab and /ask.")
     say("/askbot refresh prices - re-check prices you've asked about (now at the AH, or on your next visit).")
+    say("/askbot options - settings.  /askbot share - let friends ask with \"!ask <question>\" in guild/party chat.")
 end
 
 local function status()
@@ -1289,6 +1313,24 @@ local function status()
     end
 end
 
+local SHARE_OPTIONS = { guild = "shareGuild", party = "shareParty", raid = "shareParty", whisper = "shareWhisper",
+    whispers = "shareWhisper" }
+
+--- /ab share [guild|party|whisper] [on|off]
+local function shareCommand(cmd)
+    local where, onoff = cmd:match("^share%s*(%a*)%s*(%a*)$")
+    local key = SHARE_OPTIONS[where or ""]
+    if key and (onoff == "on" or onoff == "off") then
+        AskBot.SetOption(key, onoff == "on")
+    elseif where ~= "" and where ~= nil then
+        return say("Usage: /ab share guild|party|whisper on|off")
+    end
+    local function state(k) return AskBot.Option(k) and "|cff66cc33on|r" or "|cffff6060off|r" end
+    say("Answering \"!ask <question>\" from others: guild " .. state("shareGuild") .. ", party/raid "
+        .. state("shareParty") .. ", whispers " .. state("shareWhisper") .. ".")
+    say(GREY .. "  Change with /ab share guild on (or party, whisper; on/off), or in /ab options.|r")
+end
+
 local function onSlash(msg, editBox)
     useChatFrameOf(editBox)
     msg = (msg or ""):match("^%s*(.-)%s*$")
@@ -1309,6 +1351,13 @@ local function onSlash(msg, editBox)
     elseif cmd == "forget prices" then
         AskBotCharDB.priceWatch, AskBotCharDB.refreshPending = {}, nil
         say("Forgot the price list.")
+    elseif cmd == "options" or cmd == "settings" or cmd == "config" then
+        if not AskBot.OpenOptions() then
+            say("Settings: pin best answer " .. (AskBot.Option("autoPin") and "on" or "off")
+                .. ", " .. AskBot.Option("maxResults") .. " results per answer. Sharing: /ab share")
+        end
+    elseif cmd:match("^share") then
+        shareCommand(cmd)
     else
         AskBot.Ask(msg)
     end
@@ -1328,6 +1377,34 @@ function AskBot.Ask(msg)
         say(string.format("Still reading Questie's data (%d%%), I'll answer in a moment.",
             math.floor(D.progress * 100)))
     end
+end
+
+--- Questions only the asker's own AskBot can answer (they need their quest log).
+function AskBot.IsPersonalQuestion(question)
+    local q = normalize(question)
+    for _, entry in ipairs(SPECIAL) do
+        if entry[1] == "next" or entry[1] == "questsHere" then
+            for _, pattern in ipairs(entry[2]) do
+                if q:find(pattern) then return true end
+            end
+        end
+    end
+    return false
+end
+
+--- Answer a question for someone else (an "!ask" in chat). asker = { name, class, level,
+--- origin = { x, y, inst } or nil }. Returns the answer's lines (with AskBot's formatting).
+function AskBot.AnswerFor(question, asker)
+    if D.status ~= "ready" then return { "I'm still starting up, ask again in a moment." } end
+    local lines = {}
+    outputSink, AskBot.asker, D.originOverride = lines, asker, asker.origin or false
+    local ok, err = pcall(answer, question)
+    outputSink, AskBot.asker, D.originOverride = nil, nil, nil
+    if not ok then
+        if geterrorhandler then geterrorhandler()(err) end
+        return { "Something went wrong answering that." }
+    end
+    return lines
 end
 
 SLASH_ASKBOT1 = "/askbot"

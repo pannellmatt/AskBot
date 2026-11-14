@@ -2,13 +2,16 @@
 ## Title: AskBot
 ## Notes: Ask where things are: /askbot where is my nearest skinning trainer
 ## Author: pannellmatt
-## Version: 0.4.0
+## Version: 0.5.0
 ## X-License: GPL-3.0-or-later
 ## Dependencies: QuestieDB, Questie
 ## OptionalDeps: TomTom, AtlasLootClassic, Auctionator
+## SavedVariables: AskBotDB
 ## SavedVariablesPerCharacter: AskBotCharDB
 
 Queries.lua
+Options.lua
 Data.lua
 Integrations.lua
 AskBot.lua
+Sharing.lua

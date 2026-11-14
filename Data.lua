@@ -354,11 +354,31 @@ end
 -- Travel ranking
 --------------------------------------------------------------------------------------------
 
+
 local RUN_SPEED = 7          -- yards/second on foot
 local MOUNT_MULTIPLIER = 1.6 -- level 40 mount
 local FLY_SPEED = 30         -- yards/second on a flight path
 local FLY_PATH_FACTOR = 1.25 -- flight routes aren't straight lines
 local FLY_OVERHEAD = 15      -- seconds for take-off, landing, the flight map
+local TRANSPORT_TIME = { boat = 180, zeppelin = 150 } -- average wait plus crossing, seconds
+
+-- Boats and zeppelins: { faction ("A", "H" or "N" for both), kind, dock, dock },
+-- each dock { uiMapId, x, y, name }. Every route runs both ways.
+local TRANSPORTS = {
+    { "A", "boat", { 1424, 50.7, 70.4, "Southshore" }, { 1439, 32.3, 44.1, "Auberdine" } },
+    { "A", "boat", { 1439, 32.3, 44.1, "Auberdine" }, { 1437, 4.5, 56.7, "Menethil Harbor" } },
+    { "A", "boat", { 1437, 4.5, 56.7, "Menethil Harbor" }, { 1424, 50.7, 70.4, "Southshore" } },
+    { "A", "boat", { 1437, 4.7, 63.8, "Menethil Harbor" }, { 1445, 71.7, 56.7, "Theramore" } },
+    { "A", "boat", { 1453, 21.8, 56.9, "Stormwind Harbor" }, { 1439, 30.5, 40.9, "Auberdine" } },
+    { "A", "boat", { 1439, 33.3, 39.8, "Auberdine" }, { 1438, 54.8, 97.2, "Rut'theran Village" } },
+    { "A", "boat", { 1416, 12.8, 51.2, "Alterac Mountains" }, { 2521, 65.8, 83.8, "Zephras Isle" } },
+    { "H", "zeppelin", { 1420, 60.6, 58.9, "Undercity" }, { 1411, 51.0, 13.9, "Orgrimmar" } },
+    { "H", "zeppelin", { 1420, 61.9, 58.9, "Undercity" }, { 1434, 31.5, 29.1, "Grom'gol" } },
+    { "H", "zeppelin", { 1411, 50.5, 12.7, "Orgrimmar" }, { 1434, 31.2, 30.4, "Grom'gol" } },
+    { "H", "zeppelin", { 1412, 34.3, 26.1, "Mulgore" }, { 2521, 57.7, 81.0, "Zephras Isle" } },
+    { "H", "boat", { 2548, 80.6, 54.6, "Riverglades" }, { 1446, 68.6, 23.0, "Tanaris" } },
+    { "N", "boat", { 1434, 25.7, 73.1, "Booty Bay" }, { 1413, 63.8, 38.8, "Ratchet" } },
+}
 
 local function runSpeed()
     local mounted = IsMounted and IsMounted()
@@ -368,43 +388,171 @@ local function runSpeed()
     return RUN_SPEED
 end
 
---- Rank places by estimated travel time from the player.
---- Each result: { place, spawn, dist (yards, same continent only), time (seconds), route }
---- where route = { from = spawn, to = spawn } when flying is quicker.
-function D.Rank(places)
-    local px, py, pinst = HBD:GetPlayerWorldPosition()
-    local run = runSpeed()
+local graphs = {}
+--- The docks and crossings usable by a faction, with docks resolved to world positions.
+local function transportGraph(faction)
+    local key = faction or "N"
+    if graphs[key] then return graphs[key] end
+    local nodes, edges = {}, {}
+    local function dock(d)
+        local wx, wy, inst = HBD:GetWorldCoordinatesFromZone(d[2] / 100, d[3] / 100, d[1])
+        if not wx then return nil end
+        local n = { x = wx, y = wy, inst = inst, name = d[4], uiMapId = d[1] }
+        nodes[#nodes + 1] = n
+        return n
+    end
+    for _, t in ipairs(TRANSPORTS) do
+        if t[1] == "N" or t[1] == faction then
+            local a, b = dock(t[3]), dock(t[4])
+            if a and b then edges[#edges + 1] = { a = a, b = b, kind = t[2], time = TRANSPORT_TIME[t[2]] } end
+        end
+    end
+    graphs[key] = { nodes = nodes, edges = edges }
+    return graphs[key]
+end
+
+--- Walking or flying between two points on one continent: time, a fly step if flying
+--- is quicker, and the straight-line distance.
+local function leg(ctx, a, b)
+    if not (a.x and b.x) or a.inst ~= b.inst then return nil end
+    local d = HBD:GetWorldDistance(a.inst, a.x, a.y, b.x, b.y)
+    if not d then return nil end
+    local t, step = d / ctx.run, nil
+    local fa, da = ctx.nearestFm(a)
+    local fb, db = ctx.nearestFm(b)
+    if fa and fb and fa ~= fb then
+        local flight = HBD:GetWorldDistance(a.inst, fa.wx, fa.wy, fb.wx, fb.wy)
+        local tf = da / ctx.run + flight * FLY_PATH_FACTOR / FLY_SPEED + db / ctx.run + FLY_OVERHEAD
+        if tf < t * 0.85 then t, step = tf, { kind = "fly", from = fa, to = fb } end
+    end
+    return t, step, d
+end
+
+local function withStep(steps, step)
+    local out = {}
+    for i, s in ipairs(steps) do out[i] = s end
+    if step then out[#out + 1] = step end
+    return out
+end
+
+--- Quickest way from the origin to every dock (Dijkstra over docks and crossings).
+local function reachDocks(ctx, origin, graph)
+    local cost, steps, done = {}, {}, {}
+    for _, n in ipairs(graph.nodes) do
+        local t, step = leg(ctx, origin, n)
+        if t then cost[n], steps[n] = t, withStep({}, step) end
+    end
+    while true do
+        local u
+        for _, n in ipairs(graph.nodes) do
+            if cost[n] and not done[n] and (not u or cost[n] < cost[u]) then u = n end
+        end
+        if not u then break end
+        done[u] = true
+        for _, e in ipairs(graph.edges) do
+            local v = (e.a == u and e.b) or (e.b == u and e.a) or nil
+            if v and not done[v] and (not cost[v] or cost[u] + e.time < cost[v]) then
+                cost[v], steps[v] = cost[u] + e.time, withStep(steps[u], { kind = e.kind, from = u, to = v })
+            end
+        end
+        for _, v in ipairs(graph.nodes) do
+            if v ~= u and not done[v] and v.inst == u.inst then
+                local t, step = leg(ctx, u, v)
+                if t and (not cost[v] or cost[u] + t < cost[v]) then
+                    cost[v], steps[v] = cost[u] + t, withStep(steps[u], step)
+                end
+            end
+        end
+    end
+    return cost, steps
+end
+
+--- "fly Westfall > Stormwind City, boat Stormwind Harbor > Auberdine"
+function D.RouteText(steps)
+    local parts = {}
+    for _, s in ipairs(steps or {}) do
+        if s.kind == "fly" then
+            parts[#parts + 1] = "fly " .. D.ZoneName(s.from.uiMapId) .. " > " .. D.ZoneName(s.to.uiMapId)
+        else
+            parts[#parts + 1] = s.kind .. " " .. s.from.name .. " > " .. s.to.name
+        end
+    end
+    return table.concat(parts, ", ")
+end
+
+--- Rank places by estimated travel time from `origin` ({ x, y, inst } in world
+--- coordinates; default: the player). Routes can use flight paths, boats and zeppelins.
+--- Each result: { place, spawn, dist (yards, same continent only), time (seconds), steps }.
+--- Also returns whether a starting position was known.
+function D.Rank(places, origin)
+    if not origin then
+        if D.originOverride ~= nil then
+            -- Answering someone else: their position, or false when it isn't known.
+            origin = D.originOverride or nil
+        else
+            local px, py, pinst = HBD:GetPlayerWorldPosition()
+            if px then origin = { x = px, y = py, inst = pinst } end
+        end
+    end
     local fms = D.FlightMasters()
-    local _, startFm, startFmDist
-    if px then _, startFm, startFmDist = nearestFlightMaster(pinst, px, py, fms) end
+    local fmMemo = {}
+    local ctx = { run = runSpeed() }
+    function ctx.nearestFm(p)
+        local m = fmMemo[p]
+        if not m then
+            local _, s, d = nearestFlightMaster(p.inst, p.x, p.y, fms)
+            m = { s, d }
+            fmMemo[p] = m
+        end
+        return m[1], m[2]
+    end
+
+    local dockCost, dockSteps
+    local function docks()
+        if not dockCost then dockCost, dockSteps = reachDocks(ctx, origin, transportGraph(D.PlayerFaction())) end
+        return dockCost, dockSteps
+    end
 
     local results = {}
     for _, place in ipairs(places) do
-        -- The spawn nearest in a straight line on the player's continent, else the first one.
-        local spawn, dist
-        for _, s in ipairs(place.spawns) do
-            if px and s.wx and s.inst == pinst then
-                local d = HBD:GetWorldDistance(pinst, px, py, s.wx, s.wy)
-                if d and (not dist or d < dist) then spawn, dist = s, d end
-            end
-        end
-        spawn = spawn or place.spawns[1]
-
-        if spawn then
-            local time, route
-            if dist then time = dist / run end
-            if startFm and spawn.wx then
-                local _, endFm, endFmDist = nearestFlightMaster(spawn.inst, spawn.wx, spawn.wy, fms)
-                if endFm and endFm ~= startFm and endFm.inst == startFm.inst then
-                    local flight = HBD:GetWorldDistance(endFm.inst, startFm.wx, startFm.wy, endFm.wx, endFm.wy)
-                    local t = startFmDist / run + flight * FLY_PATH_FACTOR / FLY_SPEED + endFmDist / run + FLY_OVERHEAD
-                    if not time or t < time * 0.85 then
-                        time, route = t, { from = startFm, to = endFm }
-                    end
+        local best
+        if origin then
+            -- Same continent: the nearest spawn in a straight line, walking or flying.
+            local spawn, dist
+            for _, s in ipairs(place.spawns) do
+                if s.wx and s.inst == origin.inst then
+                    local d = HBD:GetWorldDistance(origin.inst, origin.x, origin.y, s.wx, s.wy)
+                    if d and (not dist or d < dist) then spawn, dist = s, d end
                 end
             end
-            results[#results + 1] = { place = place, spawn = spawn, dist = dist, time = time, route = route }
+            if spawn then
+                spawn.point = spawn.point or { x = spawn.wx, y = spawn.wy, inst = spawn.inst }
+                local t, step = leg(ctx, origin, spawn.point)
+                best = { place = place, spawn = spawn, dist = dist, time = t, steps = withStep({}, step) }
+            else
+                -- Another continent: via the dock that gets there soonest.
+                local cost, steps = docks()
+                local bestSpawn, bestDock, bestGuess
+                for _, s in ipairs(place.spawns) do
+                    if s.wx then
+                        for n, c in pairs(cost) do
+                            if n.inst == s.inst then
+                                local guess = c + HBD:GetWorldDistance(n.inst, n.x, n.y, s.wx, s.wy) / ctx.run
+                                if not bestGuess or guess < bestGuess then bestSpawn, bestDock, bestGuess = s, n, guess end
+                            end
+                        end
+                    end
+                end
+                if bestSpawn then
+                    bestSpawn.point = bestSpawn.point or { x = bestSpawn.wx, y = bestSpawn.wy, inst = bestSpawn.inst }
+                    local t, step = leg(ctx, bestDock, bestSpawn.point)
+                    best = { place = place, spawn = bestSpawn, time = cost[bestDock] + (t or 0),
+                        steps = withStep(steps[bestDock], step) }
+                end
+            end
         end
+        if not best and place.spawns[1] then best = { place = place, spawn = place.spawns[1] } end
+        if best then results[#results + 1] = best end
     end
 
     table.sort(results, function(a, b)
@@ -412,5 +560,5 @@ function D.Rank(places)
         if a.time or b.time then return a.time ~= nil end
         return a.place.name < b.place.name
     end)
-    return results, px ~= nil
+    return results, origin ~= nil
 end

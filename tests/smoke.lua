@@ -48,8 +48,24 @@ function geterrorhandler() return function(e) print("ERROR HANDLER: " .. tostrin
 -- Player ---------------------------------------------------------------------------------
 local faction = "Alliance"
 function UnitFactionGroup() return faction end
-function UnitClass() return "Warrior", "WARRIOR" end
-function UnitLevel() return 20 end
+local units = { player = { "Me", "Warrior", "WARRIOR", 20, 2500, 500 }, party1 = { "Buddy", "Hunter", "HUNTER", 30, 9350, 550 } }
+local inGroup = false
+function UnitClass(u) local d = units[u or "player"]; return d[2], d[3] end
+function UnitName(u) local d = units[u]; return d and (u == "player" or inGroup) and d[1] or nil end
+function UnitExists(u) return UnitName(u) ~= nil end
+function IsInGroup() return inGroup end
+function IsInRaid() return false end
+function UnitLevel(u) return units[u or "player"][4] end
+function GetTime() return now end
+function IsInGuild() return true end
+function GetNumGuildMembers() return 1 end
+function GetGuildRosterInfo(i) return "Guildie-Realm", "Member", 1, 20, "Mage", "Stormwind City", "", "", true, 0, "MAGE" end
+local sentChat, sentAddon = {}, {}
+C_ChatInfo = {
+    RegisterAddonMessagePrefix = function() end,
+    SendAddonMessage = function(prefix, text, dist) sentAddon[#sentAddon + 1] = { prefix, text, dist } end,
+    SendChatMessage = function(text, chatType, _, target) sentChat[#sentChat + 1] = { text, chatType, target } end,
+}
 function IsMounted() return false end
 
 -- Maps: each zone is 1000x1000 yards; Eastern Kingdoms = instance 0, Kalimdor = 1 ----------
@@ -57,8 +73,10 @@ local maps = {
     [1453] = { "Stormwind City", 0, 0, 0 }, [1436] = { "Westfall", 2000, 0, 0 },
     [1426] = { "Dun Morogh", 5000, 0, 0 }, [1433] = { "Redridge Mountains", 9000, 0, 0 },
     [1454] = { "Orgrimmar", 0, 0, 1 },
+    [1434] = { "Stranglethorn Vale", 2000, 2000, 0 }, [1411] = { "Durotar", 1000, 0, 1 },
+    [1439] = { "Darkshore", 3000, 0, 1 }, [1438] = { "Teldrassil", 3000, -2000, 1 },
 }
-C_Map = { GetMapInfo = function(id) return maps[id] and { name = maps[id][1] } end }
+C_Map = { GetMapInfo = function(id) return maps[id] and { name = maps[id][1], mapType = 3 } end }
 local hbd = {
     GetWorldCoordinatesFromZone = function(_, x, y, map)
         local m = maps[map]
@@ -66,6 +84,8 @@ local hbd = {
         return m[2] + x * 1000, m[3] + y * 1000, m[4]
     end,
     GetPlayerWorldPosition = function() return 2500, 500, 0 end, -- middle of Westfall
+    GetUnitWorldPosition = function(_, u) local d = units[u]; if d then return d[5], d[6], 0 end end,
+    mapData = maps,
     GetWorldDistance = function(_, _, x1, y1, x2, y2) return math.sqrt((x1 - x2) ^ 2 + (y1 - y2) ^ 2) end,
 }
 LibStub = function() return hbd end
@@ -82,7 +102,8 @@ TomTom = {
 
 -- QuestieDB data -------------------------------------------------------------------------
 local W, SW, DM, RR, OG = 40, 1519, 1, 44, 1637 -- area ids
-local areaToMap = { [SW] = 1453, [W] = 1436, [DM] = 1426, [RR] = 1433, [OG] = 1454 }
+local TD = 141
+local areaToMap = { [SW] = 1453, [W] = 1436, [DM] = 1426, [RR] = 1433, [OG] = 1454, [TD] = 1438 }
 local npcs = {
     [1] = { "Helene Peltskinner", "Skinning Trainer", 16, "A", { [SW] = { { 71.6, 62.8 } } } },
     [2] = { "Far Skinner", "Skinning Trainer", 16, "A", { [DM] = { { 50, 50 } } } },
@@ -105,6 +126,7 @@ local npcs = {
     [19] = { "Leprithus", nil, 0, nil, { [W] = { { 45, 35 } } }, 19, 19, 4 },       -- rare
     [20] = { "Foreman Grills", nil, 0, nil, { [W] = { { 30, 30 } } }, 21, 21, 2 },  -- rare elite
     [21] = { "Far Rare", nil, 0, nil, { [DM] = { { 50, 50 } } }, 10, 10, 4 },
+    [22] = { "Jannok Breezesong", nil, 0, "A", { [TD] = { { 56, 60 } } } },
 }
 local quests = {
     [100] = { "The Defias Brotherhood", 1, { { 9 } }, { { 9 } }, 18, 14 },
@@ -260,8 +282,11 @@ for line in io.lines(dir .. "/AskBot.toc") do
     if line:match("%.lua%s*$") then assert(loadfile(dir .. "/" .. line:match("^%s*(.-)%s*$")))("AskBot", AskBot) end
 end
 
-local events = frames[#frames]
-events.scripts.OnEvent(events, "PLAYER_LOGIN")
+-- Events go to every frame, as in the game.
+local function fire(event, ...)
+    for _, f in ipairs(frames) do if f.scripts.OnEvent then f.scripts.OnEvent(f, event, ...) end end
+end
+fire("PLAYER_LOGIN")
 SlashCmdList.ASKBOT("where is my nearest skinning trainer") -- asked before ready -> queued
 tickerFn()                                                   -- Questie ready -> start indexing
 for _ = 1, 10 do
@@ -316,7 +341,7 @@ AuctionFrame.shown = true
 do
     local from = #output + 1
     print("\n> (open the auction house)")
-    events.scripts.OnEvent(events, "AUCTION_HOUSE_SHOW")
+    fire("AUCTION_HOUSE_SHOW")
     advance(2)  -- AskBot starts the search
     advance(4)  -- results settle
     local text = table.concat(output, "\n", from)
@@ -406,8 +431,93 @@ ask("dungeons", { "Dungeons for level 20:", "The Deadmines|r (10-26)", "[loot]",
 ask("dungeons for level 55", "Blackrock Depths|r (48-60)", { "Deadmines" })
 ask("rares near me", { "Rare mobs nearest you:", "Leprithus|r lvl 19 |cffc0c0c0(rare)", "Foreman Grills", "(rare elite)" })
 
+-- Another continent, two boats: Westfall > Stormwind > Auberdine > Rut'theran
+ask("where is jannok breezesong", { "Jannok Breezesong", "boat Stormwind Harbor > Auberdine",
+    "boat Auberdine > Rut'theran Village" }, { "other continent" })
+
 faction = "Horde"
-ask("skinner please", "Horde Skinner", { "Helene" })
+ask("skinner please", { "Horde Skinner", "Orc Skinner|r <Skinning Trainer> - Orgrimmar", "zeppelin Grom'gol > Orgrimmar" },
+    { "Helene", "other continent" })
+faction = "Alliance"
+
+-- Settings and "!ask" from other players --------------------------------------------------
+local function expectChat(label, fn, expect, reject)
+    local from = #sentChat + 1
+    print("\n> " .. label)
+    fn()
+    for _ = 1, 50 do advance(0.1) end -- small steps, so timers started by timers run too
+    local lines = {}
+    for i = from, #sentChat do
+        local m = sentChat[i]
+        lines[#lines + 1] = m[2] .. (m[3] and (" to " .. m[3]) or "") .. ": " .. m[1]
+        print("   " .. lines[#lines])
+    end
+    local text = table.concat(lines, "\n")
+    for _, e in ipairs(expect or {}) do
+        if not text:find(e, 1, true) then failures = failures + 1; print("   !! FAIL: expected " .. e) end
+    end
+    for _, r in ipairs(reject or {}) do
+        if text:find(r, 1, true) then failures = failures + 1; print("   !! FAIL: did not expect " .. r) end
+    end
+    if not expect and #lines > 0 then failures = failures + 1; print("   !! FAIL: expected no reply") end
+end
+
+ask("share", { "guild |cffff6060off|r", "party/raid |cffff6060off|r", "whispers |cffff6060off|r" })
+expectChat("guild !ask while sharing is off", function()
+    fire("CHAT_MSG_GUILD", "!ask nearest skinning trainer", "Guildie-Realm")
+end)
+ask("share guild on", "guild |cff66cc33on|r")
+
+-- A guild member in Stormwind: answered from the middle of their zone, as plain chat
+local pinsBefore = tomtomWaypoints
+expectChat("guild: !ask nearest skinning trainer", function()
+    fire("CHAT_MSG_GUILD", "!ask nearest skinning trainer", "Guildie-Realm")
+end, { "GUILD: [AskBot] Nearest Skinning trainer:", "Helene Peltskinner <Skinning Trainer> - Stormwind City 71.6, 62.8 (" },
+    { "|c", "[pin]", "AskBot:" })
+if tomtomWaypoints ~= pinsBefore then failures = failures + 1; print("   !! FAIL: answering someone else placed a pin") end
+expectChat("same guild member again within the cooldown", function()
+    fire("CHAT_MSG_GUILD", "!ask closest inn", "Guildie-Realm")
+end)
+advance(10)
+expectChat("guild: their class trainer (they're a mage, I'm a warrior)", function()
+    fire("CHAT_MSG_GUILD", "!ask where's my class trainer", "Guildie-Realm")
+end, { "Mage trainer" }, { "Warrior" })
+advance(10)
+expectChat("guild: quest log questions need their own AskBot", function()
+    fire("CHAT_MSG_GUILD", "!ask what's next", "Guildie-Realm")
+end, { "[AskBot] I can't see your quest log" })
+advance(10)
+expectChat("guild: real item links survive", function()
+    fire("CHAT_MSG_GUILD", "!ask price of linen cloth", "Guildie-Realm")
+end, { "|cffffffff|Hitem:2589::|h[Linen Cloth]|h|r: AH" })
+advance(10)
+expectChat("guild: another player's AskBot claimed it first", function()
+    fire("CHAT_MSG_GUILD", "!ask closest inn", "Guildie-Realm")
+    fire("CHAT_MSG_ADDON", "AskBot", "claim:Guildie:closest inn", "GUILD", "Other-Realm")
+end)
+if not (sentAddon[1] and sentAddon[1][1] == "AskBot" and sentAddon[1][2]:find("^claim:Guildie:")) then
+    failures = failures + 1; print("   !! FAIL: no claim message sent")
+end
+
+-- A party member in Redridge: answered from their exact position, routed back to Westfall
+AskBot.SetOption("shareParty", true)
+inGroup = true
+expectChat("party: !ask closest inn", function()
+    fire("CHAT_MSG_PARTY", "!ask closest inn", "Buddy")
+end, { "PARTY: [AskBot] Nearest Innkeeper:", "Innkeeper Heather", "fly Redridge Mountains > Westfall" })
+inGroup = false
+expectChat("whisper while whisper sharing is off", function()
+    fire("CHAT_MSG_WHISPER", "!ask closest inn", "Stranger")
+end)
+
+-- Settings: fewer results, no automatic pin
+AskBot.SetOption("maxResults", 1)
+AskBot.SetOption("autoPin", false)
+pinsBefore = tomtomWaypoints
+ask("nearest fp", "Thor", { "Dungar Longdrink" })
+if tomtomWaypoints ~= pinsBefore then failures = failures + 1; print("   !! FAIL: pinned with auto-pin off") end
+AskBot.SetOption("maxResults", 3)
+AskBot.SetOption("autoPin", true)
 
 print(failures == 0 and "\nALL PASSED" or ("\n" .. failures .. " FAILURE(S)"))
 os.exit(failures == 0 and 0 or 1)
