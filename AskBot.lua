@@ -1479,7 +1479,20 @@ local function gearQuestion(q)
     local gearWord = words.upgrade or words.upgrades or words.gear or words.bis or words.equipment or words.wear
     local asksBetter = words.better or words.best or q:find("should i get", 1, true) or q:find("should i go for", 1, true)
         or q:find("should i use", 1, true)
-    if gearWord or (asksBetter and #slots > 0) then return slots, words end
+    -- "what boss drops are good for me", "which dungeon loot should I get"
+    local lootWord = words.drops or words.loot or words.boss or words.bosses or words.dungeon or words.dungeons
+    local forMe = q:find("for me", 1, true) or q:find("good for", 1, true) or words.should or words.worth
+    if gearWord or (asksBetter and #slots > 0) or (lootWord and forMe) then return slots, words end
+end
+
+--- Which source a gear question is limited to: "boss" (dungeon drops), "quest", "ah", or nil.
+local function gearSourceFilter(words)
+    if words.boss or words.bosses or words.dungeon or words.dungeons or words.drops or words.drop or words.loot
+        or words.instance or words.instances then
+        return "boss"
+    end
+    if words.quest or words.quests then return "quest" end
+    if words.ah or words.auction then return "ah" end
 end
 
 local SOURCE_ORDER = { quest = 1, boss = 2, ah = 3 }
@@ -1536,7 +1549,8 @@ local function answerUpgrades(slots, words)
         quests[#quests + 1] = q.id
     end
     for _, id in ipairs(doableQuests(level + 5)) do quests[#quests + 1] = id end
-    local candidates = G.Candidates({ classFile = classFile, level = level, quests = quests, inLog = inLog })
+    local only = gearSourceFilter(words)
+    local candidates = G.Candidates({ classFile = classFile, level = level, quests = quests, inLog = inLog, only = only })
     if #slots > 0 then
         local wanted = {}
         for _, g in ipairs(slots) do wanted[g] = true end
@@ -1571,11 +1585,15 @@ local function answerUpgrades(slots, words)
             end
         end
 
+        local FROM = { boss = " from dungeons", quest = " from quests", ah = " on the auction house" }
         local where = #slots > 0 and (" (" .. G.GROUP_LABELS[slots[1]]:lower() .. ")") or ""
-        say("Upgrades for " .. spec.name .. " " .. className .. where .. ", level " .. level .. ":")
+        say((only and "Upgrades" .. FROM[only] or "Upgrades") .. " for " .. spec.name .. " " .. className .. where
+            .. ", level " .. level .. ":")
         if #shown == 0 then
-            say(GREY .. "  Nothing better from quests you can do, dungeons near your level"
-                .. (AskBot.Prices.Available() and " or the auction house" or "") .. ", up to level " .. (level + 5) .. ".|r")
+            local places = { boss = "dungeons near your level", quest = "quests you can do", ah = "the auction house" }
+            local list = only and places[only] or ("quests you can do, dungeons near your level"
+                .. (AskBot.Prices.Available() and " or the auction house" or ""))
+            say(GREY .. "  Nothing better from " .. list .. ", up to level " .. (level + 5) .. ".|r")
         end
         local firstBest
         for i = 1, math.min(#shown, AskBot.Option("maxResults") + 3) do
@@ -1596,6 +1614,45 @@ local function answerUpgrades(slots, words)
             if not c.needs and not (c.req and c.req > level) then firstBest = firstBest or best end
             say("  " .. G.GROUP_LABELS[c.group] .. ": " .. itemLinkText(c.id) .. " " .. gain .. extra .. " - " .. sourceText)
         end
+        -- Which dungeons hold the most upgrades (one per slot, counting every boss source).
+        local byInst, instList = {}, {}
+        for _, c in ipairs(results) do
+            for _, s in ipairs(c.sources) do
+                if s.kind == "boss" then
+                    local inst = s.boss.instance
+                    local e = byInst[inst]
+                    if not e then
+                        e = { inst = inst, groups = {}, labels = {}, gain = 0 }
+                        byInst[inst] = e
+                        instList[#instList + 1] = e
+                    end
+                    if not e.groups[c.group] then
+                        e.groups[c.group] = true
+                        e.labels[#e.labels + 1] = G.GROUP_LABELS[c.group]
+                        e.gain = e.gain + c.gain / math.max(c.current, 1)
+                    end
+                end
+            end
+        end
+        table.sort(instList, function(a, b)
+            if #a.labels ~= #b.labels then return #a.labels > #b.labels end
+            return a.gain > b.gain
+        end)
+        local function dungeonText(e)
+            local lr = e.inst.levelRange
+            local entrance = AskBot.Loot.EntrancePlace(e.inst)
+            local r = entrance and D.Rank({ entrance })[1]
+            return GOLD .. e.inst.name .. "|r" .. (lr and (" lvl " .. lr[1] .. "-" .. (lr[3] or lr[2])) or "") .. ": "
+                .. #e.labels .. " upgrade" .. (#e.labels == 1 and "" or "s") .. " (" .. table.concat(e.labels, ", ") .. ")"
+                .. (r and (" - " .. shortHow(r) .. " " .. pinLink(r.place, r.spawn, e.inst.name)) or "")
+        end
+        if only == "boss" and #instList > 0 then
+            say("By dungeon:")
+            for i = 1, math.min(3, #instList) do say("  " .. dungeonText(instList[i])) end
+        elseif not only and instList[1] then
+            say(GREY .. "  Best dungeon:|r " .. dungeonText(instList[1]))
+        end
+
         if how == "guess" then
             local others = {}
             for _, s in ipairs(G.SPECS[classFile]) do

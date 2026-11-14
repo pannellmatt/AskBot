@@ -399,6 +399,15 @@ AtlasLoot = {
 
 -- Auctionator: a price database, and a search that finds `ahListings` while the AH is open
 local ahPrices, ahAges = { [2589] = 1250, [9004] = 5000 }, { [2589] = 0, [9004] = 0 }
+-- Eight auction chests with a higher item level but weaker stats than the Deadmines chest:
+-- they mustn't crowd it out of the items AskBot scores.
+for i = 0, 7 do
+    local id = 9100 + i
+    gear[id] = { "Market Tunic " .. i, "INVTYPE_CHEST", 4, 3, 20, 30, { ITEM_MOD_STAMINA_SHORT = 3 }, true }
+    items[id] = { name = "Market Tunic " .. i }
+    itemCache[id] = gear[id][1]
+    ahPrices[id], ahAges[id] = 2000, 0
+end
 local ahListings = {}   -- item name -> price the next search will find
 local searches = 0
 local dbUpdated
@@ -715,7 +724,8 @@ do
         "Two-hander: ", "Rockslicer", "(train Two-Handed Axes)", "[weapon master]",
         "Chest: ", "Blackened Defias Armor", "(at 21)", "The Deadmines",
         "Back: ", "Cape of the Brotherhood", "empty slot", "Edwin VanCleef|r |cff66cc3323%",
-        "Ring: ", "Silver Ring", "AH " }) do
+        "Ring: ", "Silver Ring", "AH ",
+        "Best dungeon:|r |cffffd100The Deadmines|r lvl 10-26: 3 upgrades (" }) do
         if not text:find(e, 1, true) then failures = failures + 1; print("   !! FAIL: expected " .. e) end
     end
     for _, r in ipairs({ "Apprentice Wand", "Guessing", "Checking" }) do
@@ -724,6 +734,12 @@ do
 end
 if lastPinTitle ~= "Martie Jainrose (upgrade)" then failures = failures + 1; print("   !! FAIL: pinned " .. tostring(lastPinTitle)) end
 ask("upgrades legs", { "(legs)", "Militia Leggings" }, { "Rockslicer", "Silver Ring" })
+-- Dungeon drops only, with the dungeons ranked
+ask("what boss drops are good for me?", { "Upgrades from dungeons for Arms Warrior", "Chest: ", "Blackened Defias Armor",
+    "Back: ", "Two-hander: ", "By dungeon:", "The Deadmines|r lvl 10-26: 3 upgrades (" },
+    { "Silver Ring", "Militia", "Market Tunic", "Sorry" })
+ask("upgrades from quests", { "Upgrades from quests for", "Militia Leggings" }, { "Rockslicer", "Silver Ring" })
+ask("what does vancleef drop", "Edwin VanCleef", { "Upgrades" })
 ask("better weapon", { "Two-hander: ", "Rockslicer" }, { "Militia" })
 ask("upgrades as tank", { "Upgrades for Protection Warrior" }, { "Guessing" })
 talents = { 0, 0, 0 }

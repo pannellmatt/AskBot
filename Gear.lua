@@ -344,15 +344,21 @@ end
 -- Candidates
 --------------------------------------------------------------------------------------------
 
---- Items worth scoring: { [itemId] = { group, req, needs, sources = { ... } } }.
---- opts: { classFile, level, quests = { questId, ... }, inLog = { [questId] = true } }.
+-- How many items per slot group to score, by where they come from. Each source gets its own
+-- quota, so the auction house (thousands of items) can't crowd out quests and dungeons.
+local QUOTA = { quest = 5, boss = 6, ah = 4 }
+local SOURCE_RANK = { quest = 1, boss = 2, ah = 3 }
+
+--- Items worth scoring: list of { id, group, req, needs, sources = { ... } }.
+--- opts: { classFile, level, quests = { questId, ... }, inLog = { [questId] = true },
+---         only = "quest" | "boss" | "ah" (optional: one kind of source) }.
 --- Sources: { kind = "quest", quest } / { kind = "boss", boss, rate } / { kind = "ah", price }.
---- At most `perGroup` items per slot group are kept (highest item level first).
-function Gear.Candidates(opts, perGroup)
-    local level, classFile = opts.level, opts.classFile
+function Gear.Candidates(opts)
+    local level, classFile, only = opts.level, opts.classFile, opts.only
     local skills = Gear.Skills()
     local found = {}
     local function add(id, source)
+        if only and source.kind ~= only then return end
         local c = found[id]
         if c == nil then
             local group, req, needs = Gear.Check(id, classFile, level, skills)
@@ -380,7 +386,7 @@ function Gear.Candidates(opts, perGroup)
         end
     end
     local P = AskBot.Prices
-    if P and P.Available() then
+    if P and P.Available() and (not only or only == "ah") then
         -- Anything Questie knows with a recent auction price (BoE gear, crafted or world drops).
         for _, g in ipairs(D.gearItems) do
             if g[2] >= level - 8 and g[2] <= level + 5 then
@@ -398,20 +404,29 @@ function Gear.Candidates(opts, perGroup)
         end
     end
 
-    -- Keep the most promising few per slot group, by item level.
-    local byGroup = {}
+    -- Keep the most promising few per slot group and source (by its best source), highest
+    -- item level first. Items Questie has no item level for (some AtlasLoot loot) use the
+    -- client's, if cached, else their required level.
+    local byBucket = {}
     for _, c in pairs(found) do
         if c then
-            local list = byGroup[c.group]
-            if not list then list = {}; byGroup[c.group] = list end
-            c.ilvl = (ItemDB.itemLevel and ItemDB.itemLevel(c.id)) or 0
+            local best = "ah"
+            for _, s in ipairs(c.sources) do
+                if SOURCE_RANK[s.kind] < SOURCE_RANK[best] then best = s.kind end
+            end
+            local key = c.group .. ":" .. best
+            local list = byBucket[key]
+            if not list then list = { quota = QUOTA[best] }; byBucket[key] = list end
+            local ilvl = ItemDB.itemLevel and ItemDB.itemLevel(c.id)
+            if not ilvl then ilvl = select(4, getInfo(c.id)) end
+            c.ilvl = ilvl or ((c.req or 0) + 5)
             list[#list + 1] = c
         end
     end
     local out = {}
-    for _, list in pairs(byGroup) do
+    for _, list in pairs(byBucket) do
         table.sort(list, function(a, b) if a.ilvl ~= b.ilvl then return a.ilvl > b.ilvl end return a.id < b.id end)
-        for i = 1, math.min(perGroup or 8, #list) do out[#out + 1] = list[i] end
+        for i = 1, math.min(list.quota, #list) do out[#out + 1] = list[i] end
     end
     return out
 end
