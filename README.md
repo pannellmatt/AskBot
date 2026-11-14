@@ -19,6 +19,8 @@ Built for **World of Warcraft: Forever**.
 ## What you can ask
 
 ### Levelling helper
+- `/ab where should I quest next?`: the best zones for you right now, then the nearest quest givers.
+- `/ab where should I level` (or `/ab zones for level 25`): the zones with the most quests *you* can still take near your level, each with the quest giver to head for. Worked out from Questie's data and your own progress, not a fixed levelling guide.
 - `/ab what's next`: everything in your quest log that's ready to hand in, then the nearest unfinished objectives across all your quests.
 - `/ab quests here`: quests you can pick up, nearest first, grouped by who gives them and coloured by difficulty. AskBot uses Questie's own checks, so completed quests, missing prerequisites, quests for other classes and grey quests are all left out.
 - `/ab dungeons` (or `/ab dungeons for level 25`): dungeons that suit your level, with entrance pins and a link to their loot *(with AtlasLoot)*.

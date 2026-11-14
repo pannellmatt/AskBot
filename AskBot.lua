@@ -861,37 +861,55 @@ local function answerWhatsNext()
     if first then autoPin(first.r.place, first.r.spawn, first.name) end
 end
 
-local function answerQuestsHere()
+--- Quests you could pick up: right level, not grey, not already in your log, and doable
+--- by Questie's own checks (completed, prerequisites, class, reputation, events...).
+--- `level` defaults to yours; for another level, a simple grey-quest rule replaces Questie's.
+local function doableQuests(level)
     local QuestieDBModule = QuestieLoader and QuestieLoader:ImportModule("QuestieDB")
     local isDoable = QuestieDBModule and QuestieDBModule.IsDoable
     local isTrivial = QuestieDBModule and QuestieDBModule.IsTrivial
-    local level = askerLevel()
+    local myLevel = askerLevel()
+    level = level or myLevel
     local inLog = {}
     for _, q in ipairs(questLogEntries()) do inLog[q.id] = true end
 
-    -- Group the quests you can take by the NPC or object that gives them.
-    local groups, count = {}, 0
+    local ids = {}
     for id, info in pairs(D.questInfo) do
         local req = (info.req and info.req > 0) and info.req or info.level or 1
         local fitsLevel = req <= level and not (info.max and info.max > 0 and level > info.max)
         if fitsLevel and not inLog[id] then
-            local trivialOk, trivial = true, false
-            if isTrivial then trivialOk, trivial = pcall(isTrivial, info.level) end
-            local doableOk, doable = false, nil
-            if not (trivialOk and trivial) then
-                if isDoable then doableOk, doable = pcall(isDoable, id) end
-                if not doableOk then doable = questAvailable(id) end -- fallback: faction only
+            local trivial = false
+            if level ~= myLevel then
+                trivial = info.level ~= nil and info.level > 0 and info.level < level - 7
+            elseif isTrivial then
+                local ok, result = pcall(isTrivial, info.level)
+                trivial = ok and result
             end
-            if doable then
-                local best = D.Rank(placesForIds(info.npcs, info.objects))[1]
-                if best and best.dist then -- same continent only
-                    local key = best.place.kind .. best.place.id
-                    local g = groups[key]
-                    if not g then g = { r = best, quests = {} }; groups[key] = g end
-                    g.quests[#g.quests + 1] = id
-                    count = count + 1
-                end
+            if not trivial then
+                local ok, doable = false, nil
+                if isDoable then ok, doable = pcall(isDoable, id) end
+                if not ok then doable = questAvailable(id) end -- fallback: faction only
+                if doable then ids[#ids + 1] = id end
             end
+        end
+    end
+    return ids
+end
+
+--- Quest givers near you with quests you can take, nearest first (same continent).
+local function answerQuestsHere(ids, maxGivers)
+    ids = ids or doableQuests()
+    maxGivers = maxGivers or 5
+    local groups, count = {}, 0
+    for _, id in ipairs(ids) do
+        local info = D.questInfo[id]
+        local best = D.Rank(placesForIds(info.npcs, info.objects))[1]
+        if best and best.dist then -- same continent only
+            local key = best.place.kind .. best.place.id
+            local g = groups[key]
+            if not g then g = { r = best, quests = {} }; groups[key] = g end
+            g.quests[#g.quests + 1] = id
+            count = count + 1
         end
     end
 
@@ -903,7 +921,7 @@ local function answerQuestsHere()
     table.sort(list, function(a, b) return quicker(a.r, b.r) end)
 
     say("Quests you can pick up (" .. count .. " on this continent), nearest first:")
-    for i = 1, math.min(5, #list) do
+    for i = 1, math.min(maxGivers, #list) do
         local g = list[i]
         table.sort(g.quests, function(a, b) return (QuestDB.questLevel(a) or 0) < (QuestDB.questLevel(b) or 0) end)
         local names = {}
@@ -914,7 +932,77 @@ local function answerQuestsHere()
         say("  " .. describe(g.r, "quests"))
         say("      " .. table.concat(names, ", "))
     end
-    autoPin(list[1].r.place, list[1].r.spawn, "quests")
+    return list[1].r
+end
+
+--- Zones worth questing in: those with the most quests you can take near your level,
+--- each with its busiest quest giver as the hub to head for.
+local function answerZones(level, ids, maxZones)
+    level = level or askerLevel()
+    ids = ids or doableQuests(level)
+    maxZones = maxZones or 3
+
+    local zones = {}
+    for _, id in ipairs(ids) do
+        local info = D.questInfo[id]
+        local giver = placesForIds(info.npcs, info.objects)[1]
+        local spawn = giver and giver.spawns[1]
+        if spawn then
+            local z = zones[spawn.uiMapId]
+            if not z then z = { map = spawn.uiMapId, levels = {}, givers = {}, fit = 0 }; zones[spawn.uiMapId] = z end
+            local ql = info.level or 0
+            z.levels[#z.levels + 1] = ql
+            if ql >= level - 2 and ql <= level + 3 then z.fit = z.fit + 1 end
+            local key = giver.kind .. giver.id
+            local g = z.givers[key]
+            if not g then g = { place = giver, n = 0 }; z.givers[key] = g end
+            g.n = g.n + 1
+        end
+    end
+
+    local list = {}
+    for _, z in pairs(zones) do
+        if #z.levels >= 3 then
+            z.score = z.fit * 2 + #z.levels
+            list[#list + 1] = z
+        end
+    end
+    if #list == 0 then
+        say("Questie doesn't know of a zone with several quests for level " .. level .. " that you haven't done.")
+        return nil
+    end
+    table.sort(list, function(a, b) return a.score > b.score end)
+
+    say("Best zones to quest in at level " .. level .. ":")
+    local firstHub
+    for i = 1, math.min(maxZones, #list) do
+        local z = list[i]
+        table.sort(z.levels)
+        local lo = z.levels[math.floor(#z.levels * 0.15) + 1]
+        local hi = z.levels[math.max(1, math.ceil(#z.levels * 0.85))]
+        local hub
+        for _, g in pairs(z.givers) do
+            if not hub or g.n > hub.n then hub = g end
+        end
+        local zoneName = D.ZoneName(z.map)
+        say("  " .. GOLD .. zoneName .. "|r: " .. #z.levels .. " quests for you"
+            .. (lo > 0 and (" (mostly level " .. lo .. (hi > lo and ("-" .. hi) or "") .. ")") or ""))
+        local r = D.Rank({ hub.place })[1]
+        if r then
+            say("      start at " .. describe(r, zoneName) .. GREY .. " - " .. hub.n .. " quest" .. (hub.n == 1 and "" or "s") .. "|r")
+            firstHub = firstHub or r
+        end
+    end
+    return firstHub
+end
+
+--- "Where should I quest next?": the best zones, then the nearest quest givers.
+local function answerWhereToQuest()
+    local ids = doableQuests()
+    local hub = answerZones(nil, ids, 2)
+    local nearest = answerQuestsHere(ids, 3)
+    local target = hub or nearest
+    if target then autoPin(target.place, target.spawn, "quests") end
 end
 
 local function answerDungeons(level)
@@ -1000,6 +1088,15 @@ local INTENTS = {
 
 -- Levelling-helper questions, checked before the patterns above.
 local SPECIAL = {
+    { "questNext", {
+        "^where should i quest", "^where can i quest", "^where to quest", "^where do i quest", "^where shall i quest",
+        "^what should i quest", "^where should i go next", "^where should i go now", "^where next$", "^where now$",
+        "^where to go next", "^where do i go next", "^quest next$", "^questing next$" } },
+    { "zones", {
+        "^zones? for level (%d+)$", "^level (%d+) zones?$", "^where should i level at (%d+)$", "^where to level at (%d+)$",
+        "^where should i level", "^where to level", "^where do i level", "^where can i level", "^where should i go$",
+        "^zones?$", "^zones? for me$", "^zones? for my level$", "^what zones?", "^which zones?", "^best zones?",
+        "^levell?ing zones?", "^where to go$" } },
     { "next", {
         "^what is next$", "^whats next$", "^what next$", "^next$", "^what now$", "^what should i do",
         "^what do i do", "^my quests$", "^quest log$", "^questlog$", "^todo$", "^to do$", "^next steps?$" } },
@@ -1106,7 +1203,17 @@ local function answer(question)
             local found, _, arg = q:find(pattern)
             if found then
                 if entry[1] == "next" then return answerWhatsNext() end
-                if entry[1] == "questsHere" then return answerQuestsHere() end
+                if entry[1] == "questNext" then return answerWhereToQuest() end
+                if entry[1] == "questsHere" then
+                    local r = answerQuestsHere()
+                    if r then autoPin(r.place, r.spawn, "quests") end
+                    return
+                end
+                if entry[1] == "zones" then
+                    local r = answerZones(tonumber(arg))
+                    if r then autoPin(r.place, r.spawn, "quests") end
+                    return
+                end
                 if entry[1] == "dungeons" then return answerDungeons(tonumber(arg)) end
                 if entry[1] == "rares" then return answerRares() end
             end
@@ -1274,8 +1381,8 @@ end)
 --------------------------------------------------------------------------------------------
 
 local function help()
-    say("Ask me where things are. Levelling: " .. GOLD .. "/ab what's next|r, " .. GOLD .. "/ab quests here|r, "
-        .. GOLD .. "/ab dungeons|r, " .. GOLD .. "/ab rares|r. Examples:")
+    say("Ask me where things are. Levelling: " .. GOLD .. "/ab where should I quest next|r, " .. GOLD .. "/ab what's next|r, "
+        .. GOLD .. "/ab quests here|r, " .. GOLD .. "/ab zones|r, " .. GOLD .. "/ab dungeons|r, " .. GOLD .. "/ab rares|r. Examples:")
     say("  /askbot where is my nearest skinning trainer")
     say("  /askbot nearest flight master    /askbot where's my class trainer")
     say("  /askbot who gives The Defias Brotherhood    /askbot turn in Bounty on Murlocs")
@@ -1383,7 +1490,7 @@ end
 function AskBot.IsPersonalQuestion(question)
     local q = normalize(question)
     for _, entry in ipairs(SPECIAL) do
-        if entry[1] == "next" or entry[1] == "questsHere" then
+        if entry[1] == "next" or entry[1] == "questsHere" or entry[1] == "questNext" or entry[1] == "zones" then
             for _, pattern in ipairs(entry[2]) do
                 if q:find(pattern) then return true end
             end

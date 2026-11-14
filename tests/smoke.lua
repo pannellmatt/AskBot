@@ -140,9 +140,15 @@ local quests = {
     [106] = { "Too Easy", 1, { { 9 } }, { { 9 } }, 3, 1 },                  -- grey for a level 20
     [107] = { "Too Hard", 1, { { 9 } }, { { 9 } }, 30, 28 },                -- level 28 needed
     [108] = { "Already Done", 1, { { 5 } }, { { 5 } }, 15, 10 },            -- Questie says not doable
+    [109] = { "Westfall Stew", 1, { { 9 } }, { { 9 } }, 15, 12 },
+    [110] = { "Goretusk Liver Pie", 1, { { 9 } }, { { 9 } }, 16, 12 },
+    [111] = { "Redridge Goulash", 1, { { 16 } }, { { 16 } }, 18, 15 },
+    [112] = { "Blackrock Menace", 1, { { 16 } }, { { 16 } }, 19, 16 },
+    [113] = { "Shadowhide Gnolls", 1, { { 16 } }, { { 16 } }, 22, 18 },
 }
 -- What Questie's IsDoable would say (completed quests, prerequisites, etc.)
-local doable = { [102] = true, [105] = true, [106] = true, [107] = true }
+local doable = { [102] = true, [105] = true, [106] = true, [107] = true, [109] = true, [110] = true,
+    [111] = true, [112] = true, [113] = true }
 -- Quest log: 100 complete, 103 half done (thugs killed), 104 in progress; 102 not taken.
 local questLog = {
     [100] = { complete = true, objectives = {} },
@@ -423,9 +429,22 @@ SlashCmdList.ASKBOT("status", { chatFrame = DEFAULT_CHAT_FRAME }) -- switch back
 -- Levelling helper
 ask("what's next", { "Ready to hand in:", "The Defias Brotherhood", "Gryan Stoutmantle", "Nearest objectives:",
     "Linen Cloth|r from: ", "Scout the Redridge camp" }, { "Kill: " })
-ask("quests here", { "Quests you can pick up (2 on this continent)", "Gryan Stoutmantle", "Patrolling Westfall",
+ask("quests here", { "Quests you can pick up (7 on this continent)", "Gryan Stoutmantle", "Patrolling Westfall",
     "Wanted Poster", "Bounty on Murlocs" }, { "Too Easy", "Too Hard", "Already Done", "Defias Brotherhood" })
 ask("what quests can i get", "Patrolling Westfall")
+-- Zones: at level 20 Redridge (quests 18-22) beats Westfall (quests 12-16)
+do
+    local from = #output + 1
+    ask("where should i level", { "Best zones to quest in at level 20:", "Redridge Mountains|r: 3 quests for you (mostly level 18-22)",
+        "start at |cffffd100Martie Jainrose", "Westfall|r: 4 quests for you" })
+    local text = table.concat(output, "\n", from)
+    if (text:find("Redridge Mountains|r:", 1, true) or 0) > (text:find("Westfall|r:", 1, true) or 0) then
+        failures = failures + 1; print("   !! FAIL: Redridge should rank above Westfall at level 20")
+    end
+end
+ask("zones for level 14", { "Best zones to quest in at level 14:", "Westfall|r: 4 quests for you" }, { "Redridge", "Too Easy" })
+ask("where should i quest next?", { "Best zones to quest in at level 20:", "Redridge Mountains", "Quests you can pick up",
+    "Wanted Poster" })
 ask("dungeons", { "Dungeons for level 20:", "The Deadmines|r (10-26)", "[loot]", "entrance Westfall 42.6, 71.8" },
     { "Blackrock Depths" })
 ask("dungeons for level 55", "Blackrock Depths|r (48-60)", { "Deadmines" })
