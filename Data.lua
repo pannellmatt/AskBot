@@ -16,6 +16,9 @@ local D = {
     questInfo = {},     -- quest id -> { level, req, max, npcs, objects } for quests with a giver
     unlocks = {},       -- quest id -> quests that list it as a prerequisite
     rares = {},         -- npc id -> rank (2 = rare elite, 4 = rare)
+    gather = {},        -- node name -> { name, prof, skill, special, items, ids }
+    gatherKeys = {},    -- name key (node or item) -> { display, nodes = { node names } }
+    gatherNames = {},   -- list of { key, key, displayName } for FindByName
 }
 AskBot.Data = D
 
@@ -207,6 +210,42 @@ function D.ObjectPlace(id)
     return p or nil
 end
 
+--- A gathering node type (all objects sharing a name) as one place, with every spawn point
+--- of every object, duplicates removed. Cached.
+local gatherPlaces = {}
+function D.GatherPlace(name)
+    local p = gatherPlaces[name]
+    if p then return p end
+    local node = D.gather[name]
+    if not node then return nil end
+    p = { kind = "object", id = node.ids[1], name = name, spawns = {}, node = node }
+    local seen = {}
+    for _, id in ipairs(node.ids) do
+        local op = D.ObjectPlace(id)
+        for _, s in ipairs(op and op.spawns or {}) do
+            local k = s.uiMapId .. ":" .. math.floor(s.x * 10 + 0.5) .. ":" .. math.floor(s.y * 10 + 0.5)
+            if not seen[k] then
+                seen[k] = true
+                p.spawns[#p.spawns + 1] = s
+            end
+        end
+    end
+    gatherPlaces[name] = p
+    return p
+end
+
+local function addGatherKey(name, node)
+    local key = D.NameKey(name)
+    local e = D.gatherKeys[key]
+    if not e then
+        e = { display = name, nodes = {} }
+        D.gatherKeys[key] = e
+        D.gatherNames[#D.gatherNames + 1] = { key, key, name }
+    end
+    for _, n in ipairs(e.nodes) do if n == node then return end end
+    e.nodes[#e.nodes + 1] = node
+end
+
 function D.PlayerFaction()
     local f = UnitFactionGroup("player")
     if f == "Alliance" then return "A" elseif f == "Horde" then return "H" end
@@ -224,7 +263,8 @@ local YIELD_EVERY = 400
 
 function D.BuildIndex()
     local npcIds, questIds, itemIds = NpcDB.GetAllIds(), QuestDB.GetAllIds(), ItemDB.GetAllIds()
-    local total = #npcIds * 2 + #questIds * 2 + #itemIds
+    local objectIds = ObjectDB.GetAllIds and ObjectDB.GetAllIds() or {}
+    local total = #npcIds * 2 + #questIds * 2 + #itemIds + #objectIds
     local done = 0
     local function step()
         done = done + 1
@@ -281,6 +321,24 @@ function D.BuildIndex()
     indexNames(NpcDB, npcIds, D.npcNames)
     indexNames(QuestDB, questIds, D.questNames)
     indexNames(ItemDB, itemIds, D.itemNames, D.itemIds)
+
+    -- Gathering nodes: mining veins, herbs, fishing schools
+    for i = 1, #objectIds do
+        local id = objectIds[i]
+        local name = ObjectDB.name(id)
+        local def = name and AskBot.GatherNodeFor(name)
+        if def then
+            local node = D.gather[name]
+            if not node then
+                node = { name = name, prof = def[1], skill = def[2], items = def[3], special = def.special, ids = {} }
+                D.gather[name] = node
+                addGatherKey(name, name)
+                for _, item in ipairs(def[3]) do addGatherKey(item, name) end
+            end
+            node.ids[#node.ids + 1] = id
+        end
+        step()
+    end
 
     -- Quest givers and level ranges, for "quests near me"
     for i = 1, #questIds do

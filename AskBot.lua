@@ -1284,6 +1284,154 @@ local function answerRares()
 end
 
 --------------------------------------------------------------------------------------------
+-- Gathering: mining veins, herbs, fishing schools
+--------------------------------------------------------------------------------------------
+
+--- Your rank in a profession: a number, false if you don't have it, nil if unknown
+--- (answering someone else, or the skill API is missing).
+local function professionSkill(prof)
+    if AskBot.asker or not GetNumSkillLines or not GetSkillLineInfo then return nil end
+    for i = 1, GetNumSkillLines() do
+        local name, isHeader, _, rank = GetSkillLineInfo(i)
+        if name == prof and not isHeader then return rank end
+    end
+    return false
+end
+
+-- Vanilla gathering colours: orange until skill+25, yellow until +50, green until +100.
+local function skillColour(rank, req)
+    if not rank or not req then return "|cffc0c0c0" end
+    if rank < req then return "|cffff4040" end
+    if rank < req + 25 then return "|cffff8040" end
+    if rank < req + 50 then return "|cffffff00" end
+    if rank < req + 100 then return "|cff40c040" end
+    return "|cff808080"
+end
+
+local function skillLabel(node, rank)
+    if not node.skill then return node.prof end
+    return skillColour(rank, node.skill) .. node.prof .. " " .. node.skill .. "|r"
+end
+
+--- Node names for a gathering subject ("copper", "copper ore", "peacebloom", "tin vein").
+--- `mode`: nil for the exact name only; "suffix" also tries adding " ore", " vein" etc.;
+--- "fuzzy" also accepts partial names. Returns the node names and the display name matched.
+local function gatherLookup(subject, mode)
+    subject = subject:gsub("^the ", "")
+    local tries = { subject }
+    if mode then
+        for _, suffix in ipairs({ " ore", " vein", " deposit", " school" }) do tries[#tries + 1] = subject .. suffix end
+    end
+    for _, t in ipairs(tries) do
+        local e = D.gatherKeys[D.NameKey(t)]
+        if e then return e.nodes, e.display end
+    end
+    if mode == "fuzzy" then
+        local hits = D.FindByName(D.gatherNames, subject)
+        if hits then
+            local e = D.gatherKeys[hits[1][1]]
+            return e.nodes, e.display
+        end
+    end
+end
+
+--- Nearest node of each type, then the zones with the most spawn points, then a skill check.
+local function answerGather(nodeNames, heading, noSkillNote)
+    local places, all = {}, {}
+    for _, name in ipairs(nodeNames) do
+        local p = D.GatherPlace(name)
+        if p and #p.spawns > 0 then
+            places[#places + 1] = p
+            for _, s in ipairs(p.spawns) do all[#all + 1] = s end
+        end
+    end
+    if #places == 0 then
+        return say("Questie has no spawn points for " .. GOLD .. table.concat(nodeNames, ", ") .. "|r.")
+    end
+    if heading then say(heading) end
+
+    local prof = places[1].node.prof
+    local rank = professionSkill(prof)
+    for _, p in ipairs(places) do p.sub = skillLabel(p.node, rank) end
+    local results, havePosition = D.Rank(places)
+    for i = 1, math.min(3, #results) do
+        say((heading and "  " or "") .. describe(results[i]))
+    end
+
+    -- Where the nodes are thickest: the top zones by spawn points, with travel to each.
+    local byZone, zones = {}, {}
+    for _, s in ipairs(all) do
+        local z = byZone[s.uiMapId]
+        if not z then
+            z = { spawns = {}, uiMapId = s.uiMapId }
+            byZone[s.uiMapId] = z
+            zones[#zones + 1] = z
+        end
+        z.spawns[#z.spawns + 1] = s
+    end
+    if #zones > 1 then
+        table.sort(zones, function(a, b) return #a.spawns > #b.spawns end)
+        local parts = {}
+        for i = 1, math.min(3, #zones) do
+            local z = zones[i]
+            local zp = { kind = "object", name = results[1].place.name, spawns = z.spawns }
+            local r = D.Rank({ zp })[1]
+            local how = r.time and (" (" .. shortHow(r) .. ")") or ""
+            parts[#parts + 1] = D.ZoneName(z.uiMapId) .. " " .. #z.spawns .. how .. " " .. pinLink(zp, r.spawn)
+        end
+        say(GREY .. "  Most nodes:|r " .. table.concat(parts, ", "))
+    end
+
+    -- Can you gather it?
+    local lowest
+    for _, p in ipairs(places) do
+        if p.node.skill and (not lowest or p.node.skill < lowest) then lowest = p.node.skill end
+    end
+    if noSkillNote or prof == "Fishing" then
+        -- nothing to add (a "where should I mine" heading already says it)
+    elseif rank == false then
+        say(GREY .. "  You don't have " .. prof .. ".|r")
+    elseif rank and lowest and rank < lowest then
+        say(GREY .. "  You need " .. prof .. " " .. lowest .. " (you have " .. rank .. ").|r")
+    end
+    if not havePosition then
+        say(GREY .. "  (No position known, so these aren't sorted by distance.)|r")
+    end
+    pinBest(results[1])
+end
+
+--- "Where should I mine?": the best node type for your skill, and what opens up next.
+local function answerGatherBest(prof)
+    local rank = professionSkill(prof)
+    local best, nextUp = {}, nil
+    local target = rank or 1
+    local bestSkill
+    for name, node in pairs(D.gather) do
+        if node.prof == prof and node.skill and not node.special then
+            if node.skill <= target and (not bestSkill or node.skill > bestSkill) then bestSkill = node.skill end
+        end
+    end
+    for name, node in pairs(D.gather) do
+        if node.prof == prof and node.skill and not node.special then
+            if node.skill == bestSkill then best[#best + 1] = name end
+            if node.skill > target and (not nextUp or node.skill < nextUp.skill) then nextUp = node end
+        end
+    end
+    if #best == 0 then return say("Questie doesn't list any " .. prof .. " nodes.") end
+    table.sort(best)
+    local heading
+    if rank then
+        heading = prof .. " " .. rank .. ": best for skill-ups"
+            .. (nextUp and (GREY .. " (" .. nextUp.name .. " at " .. nextUp.skill .. ")|r") or "") .. ":"
+    elseif rank == false then
+        heading = "You don't have " .. prof .. " yet. Starter nodes:"
+    else
+        heading = "I can't see your " .. prof .. " skill, so here are the starter nodes:"
+    end
+    answerGather(best, heading, true)
+end
+
+--------------------------------------------------------------------------------------------
 -- Quest chains: what comes before and after a quest
 --------------------------------------------------------------------------------------------
 
@@ -1518,6 +1666,13 @@ local INTENTS = {
         "^where do i get quest (.+)$", "^where can i get the quest (.+)$", "^where can i get quest (.+)$",
         "^where does the quest (.+) start$", "^where does quest (.+) start$", "^where does (.+) start$",
         "^where do i start (.+)$", "^start quest (.+)$", "^quest (.+)$" } },
+    { "gather", {
+        "^where can i mine (.+)$", "^where do i mine (.+)$", "^where to mine (.+)$", "^where should i mine (.+)$",
+        "^where can i pick (.+)$", "^where do i pick (.+)$", "^where to pick (.+)$", "^where should i pick (.+)$",
+        "^where can i gather (.+)$", "^where do i gather (.+)$", "^where to gather (.+)$", "^where can i herb (.+)$",
+        "^where can i fish for (.+)$", "^where do i fish for (.+)$", "^where to fish for (.+)$", "^where can i fish (.+)$",
+        "^mine (.+)$", "^pick (.+)$", "^gather (.+)$", "^fish for (.+)$",
+        "^where are (.+) nodes?$", "^where is (.+) nodes?$", "^where are (.+) veins$", "^(.+) nodes?$" } },
     { "buy", {
         "^where can i buy (.+)$", "^where do i buy (.+)$", "^where to buy (.+)$", "^who sells (.+)$",
         "^where is (.+) sold$", "^where are (.+) sold$", "^what vendor sells (.+)$", "^buy (.+)$",
@@ -1534,6 +1689,18 @@ local INTENTS = {
 
 -- Levelling-helper questions, checked before the patterns above.
 local SPECIAL = {
+    { "mineBest", {
+        "^where can i mine$", "^where should i mine$", "^where do i mine$", "^where to mine$", "^what can i mine$",
+        "^what should i mine$", "^where should i go mining$", "^where to go mining$", "^where can i go mining$",
+        "^where should i level mining$", "^where to level mining$", "^where do i level mining$", "^levell?ing mining$",
+        "^level mining$", "^mining nodes$", "^ore$", "^ores$" } },
+    { "herbBest", {
+        "^where can i herb$", "^where should i herb$", "^where do i herb$", "^where to herb$",
+        "^where can i pick herbs$", "^where should i pick herbs$", "^where to pick herbs$", "^where can i find herbs$",
+        "^where can i gather herbs$", "^where to gather herbs$", "^what herbs can i pick$", "^what herbs can i gather$",
+        "^what should i pick$", "^where should i go herbing$", "^where to go herbing$", "^where should i level herbalism$",
+        "^where to level herbalism$", "^where do i level herbalism$", "^levell?ing herbalism$", "^level herbalism$",
+        "^herbs$", "^herb nodes$" } },
     { "questNext", {
         "^where should i quest", "^where can i quest", "^where to quest", "^where do i quest", "^where shall i quest",
         "^what should i quest", "^where should i go next", "^where should i go now", "^where next$", "^where now$",
@@ -1650,6 +1817,8 @@ local function answer(question)
         for _, pattern in ipairs(entry[2]) do
             local found, _, arg = q:find(pattern)
             if found then
+                if entry[1] == "mineBest" then return answerGatherBest("Mining") end
+                if entry[1] == "herbBest" then return answerGatherBest("Herbalism") end
                 if entry[1] == "next" then return answerWhatsNext() end
                 if entry[1] == "questNext" then return answerWhereToQuest() end
                 if entry[1] == "questsHere" then
@@ -1666,6 +1835,14 @@ local function answer(question)
                 if entry[1] == "rares" then return answerRares() end
             end
         end
+    end
+
+    if intent == "gather" or intent == "get" then
+        -- "where can I mine copper", "where do I get Peacebloom": a gathering node beats the
+        -- item's other sources. Unknown names fall through to the item/NPC/quest search.
+        local nodes = gatherLookup(subject, intent == "gather" and "fuzzy" or "suffix")
+        if nodes then return answerGather(nodes) end
+        intent = "get"
     end
 
     if intent == "chain" then
@@ -1706,6 +1883,8 @@ local function answer(question)
     if AskBot.Loot.status == "ready" and (exactHits(AskBot.Loot.bossNames, subject2) or exactHits(AskBot.Loot.instanceNames, subject2)) then
         return answerLoot(subject2)
     end
+    local nodes = gatherLookup(subject2)
+    if nodes then return answerGather(nodes) end
     local hits, others = exactHits(D.npcNames, subject2)
     if hits then return answerNpcName(hits, others) end
     hits, others = exactHits(D.itemNames, subject2)
@@ -1842,6 +2021,7 @@ local function help()
     say("  /askbot where is Gryan Stoutmantle    /askbot [shift-click an item or quest]")
     say("  /askbot what does VanCleef drop    /askbot Deadmines loot    /askbot price of Linen Cloth")
     say("  /askbot what do I need before [quest]    /askbot what comes after [quest]")
+    say("  /askbot where can I mine copper    /askbot Peacebloom    /askbot where should I mine")
     say("Click " .. "|cff71d5ff[pin]|r" .. " on any answer to put a pin on it.")
     say("/askbot clear - remove the pin.  /askbot status - index info.  Also /ab and /ask.")
     say("/askbot refresh prices - re-check prices you've asked about (now at the AH, or on your next visit).")

@@ -56,6 +56,13 @@ Vendors that sell it, mobs and objects that drop it, quests that reward it, and 
 - `/ab where does Linen Cloth drop`
 - `/ab where can I get [shift-clicked item]`
 
+### Mining, herbs and fishing schools
+The nearest node, the zones with the most nodes, and whether your skill is high enough (coloured like the game's skill-up colours).
+
+- `/ab where can I mine copper` (or `/ab copper ore`, `/ab tin nodes`)
+- `/ab Peacebloom` (or `/ab where can I pick Kingsblood`)
+- `/ab where should I mine` / `/ab where should I level herbalism`: the best node for your current skill, and what opens up next.
+
 ### Dungeon loot and drop rates *(with AtlasLoot)*
 What a boss drops, with drop rates, plus a pin on the dungeon entrance.
 

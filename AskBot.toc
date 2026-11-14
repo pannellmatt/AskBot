@@ -11,6 +11,7 @@
 
 Queries.lua
 KnownLocations.lua
+Gathering.lua
 Options.lua
 Data.lua
 Integrations.lua

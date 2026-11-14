@@ -213,7 +213,19 @@ local items = {
     [2570] = { name = "Linen Shirt", vendors = { 12 } },
     [2996] = { name = "Bolt of Linen Cloth" },
 }
-local objects = { [500] = { "Wanted Poster", { [W] = { { 53, 52 } } } }, [501] = { "Shrine of Remulos", { [W] = { { 20, 80 } } } } }
+local objects = { [500] = { "Wanted Poster", { [W] = { { 53, 52 } } } }, [501] = { "Shrine of Remulos", { [W] = { { 20, 80 } } } },
+    -- Gathering: copper in Westfall (2 points; 2055 repeats one) and Dun Morogh (3)
+    [1731] = { "Copper Vein", { [W] = { { 40, 50 }, { 60, 50 } }, [DM] = { { 10, 10 }, { 20, 20 }, { 30, 30 } } } },
+    [2055] = { "Copper Vein", { [W] = { { 40, 50 } } } },
+    [1732] = { "Tin Vein", { [RR] = { { 50, 50 } } } },
+    [1733] = { "Silver Vein", { [RR] = { { 60, 60 } } } },
+    [1618] = { "Peacebloom", { [W] = { { 55, 45 } } } },
+    [439558] = { "Cold Iron Deposit", { [RR] = { { 10, 90 } } } },
+}
+-- Skills: Mining 70, no Herbalism
+local skillLines = { { "Professions", true }, { "Mining", false, 70 }, { "Secondary Skills", true }, { "Fishing", false, 20 } }
+function GetNumSkillLines() return #skillLines end
+function GetSkillLineInfo(i) local s = skillLines[i]; return s[1], s[2], true, s[3] end
 
 local function ids(t) local out = {} for id in pairs(t) do out[#out + 1] = id end table.sort(out) return out end
 NpcDB = {
@@ -250,6 +262,7 @@ for _, field in ipairs({ "name", "npcDrops", "objectDrops", "vendors", "questRew
     ItemDB[field] = function(id) return items[id] and items[id][field] end
 end
 ObjectDB = {
+    GetAllIds = function() return ids(objects) end,
     name = function(id) return objects[id] and objects[id][1] end,
     spawns = function(id) return objects[id][2] end,
 }
@@ -561,6 +574,23 @@ ask("what comes after done earlier", { "After ", "[13] After Done|r - pick up fr
 ask("what do i need before done earlier", "You've already done")
 ask("what comes after chain part 3", "Nothing follows")
 for _, id in ipairs({ 130, 133, 136, 137 }) do doable[id] = nil end
+
+-- Gathering
+ask("where can i mine copper", { "Copper Vein|r <", "Mining 1|r> - Westfall 40.0, 50.0", "Most nodes:|r Dun Morogh 3",
+    "Westfall 2 (" }, { "You need", "Westfall 3" })
+if lastPinTitle ~= "Copper Vein" then
+    failures = failures + 1; print("   !! FAIL: pin title " .. tostring(lastPinTitle))
+end
+ask("where can i get copper ore", "Copper Vein|r <")
+ask("copper nodes", "Copper Vein|r <")
+ask("where to mine silver", { "Silver Vein|r <", "You need Mining 75 (you have 70)" })
+ask("peacebloom", { "Peacebloom|r <", "Herbalism 1", "You don't have Herbalism." }, { "Most nodes" })
+ask("where can i find peacebloom", "Peacebloom|r <")
+ask("where should i mine", { "Mining 70: best for skill-ups", "(Silver Vein at 75)", "Tin Vein|r <" }, { "Copper Vein|r <" })
+ask("where should i level herbalism", { "You don't have Herbalism yet. Starter nodes:", "Peacebloom|r <" },
+    { "You don't have Herbalism.", "zone" })
+ask("where are cold iron deposit nodes", { "Cold Iron Deposit|r <Mining> - Redridge" })
+ask("where can i get linen cloth", "Linen Cloth", { "Vein", "Peacebloom" })
 
 -- Settings and "!ask" from other players --------------------------------------------------
 local function expectChat(label, fn, expect, reject)
