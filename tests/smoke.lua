@@ -225,6 +225,9 @@ local items = {
     [2996] = { name = "Bolt of Linen Cloth" },
     [6866] = { name = "Symbol of Life", questRewards = { 1789 } },
     [6994] = { name = "Whitestone Oak Lumber", npcDrops = { 641 } },
+    [9001] = { name = "Militia Leggings", questRewards = { 112 } },
+    [9005] = { name = "Apprentice Wand", questRewards = { 112 } },
+    [9004] = { name = "Silver Ring" },
 }
 local objects = { [500] = { "Wanted Poster", { [W] = { { 53, 52 } } } }, [501] = { "Shrine of Remulos", { [W] = { { 20, 80 } } } },
     -- Gathering: copper in Westfall (2 points; 2055 repeats one) and Dun Morogh (3)
@@ -238,7 +241,9 @@ local objects = { [500] = { "Wanted Poster", { [W] = { { 53, 52 } } } }, [501] =
     [502] = { "Strange Lockbox", { [W] = { { 20, 20 } } } },    -- Questie links the wrong half to it
 }
 -- Skills: Mining 70, no Herbalism
-local skillLines = { { "Professions", true }, { "Mining", false, 70 }, { "Secondary Skills", true }, { "Fishing", false, 20 } }
+local skillLines = { { "Professions", true }, { "Mining", false, 70 }, { "Secondary Skills", true }, { "Fishing", false, 20 },
+    { "Weapon Skills", true }, { "Axes", false, 100 }, { "Swords", false, 100 }, { "Maces", false, 100 },
+    { "Armor Proficiencies", true }, { "Cloth", false, 1 }, { "Leather", false, 1 }, { "Mail", false, 1 }, { "Shield", false, 1 } }
 function GetNumSkillLines() return #skillLines end
 function GetSkillLineInfo(i) local s = skillLines[i]; return s[1], s[2], true, s[3] end
 
@@ -276,6 +281,11 @@ ItemDB = { GetAllIds = function() return ids(items) end }
 for _, field in ipairs({ "name", "npcDrops", "objectDrops", "vendors", "questRewards", "itemDrops" }) do
     ItemDB[field] = function(id) return items[id] and items[id][field] end
 end
+local gear -- filled in with the game item stubs below
+ItemDB.class = function(id) return gear[id] and gear[id][3] end
+ItemDB.subClass = function(id) return gear[id] and gear[id][4] end
+ItemDB.requiredLevel = function(id) return gear[id] and gear[id][5] end
+ItemDB.itemLevel = function(id) return gear[id] and gear[id][6] end
 ObjectDB = {
     GetAllIds = function() return ids(objects) end,
     name = function(id) return objects[id] and objects[id][1] end,
@@ -301,12 +311,46 @@ QuestieLoader = { ImportModule = function() return {
 local bags = {}  -- item id -> count in your bags
 local itemCache = { [5193] = "Cape of the Brotherhood", [5202] = "Corsair's Overshirt",
     [10399] = "Blackened Defias Armor", [872] = "Rockslicer", [2589] = "Linen Cloth" }
+-- Gear: { name, equipLoc, classID, subclassID, requiredLevel, itemLevel, stats, loaded }
+gear = {
+    [9010] = { "Worn Leggings", "INVTYPE_LEGS", 4, 3, 10, 15, { ITEM_MOD_STRENGTH_SHORT = 1, ITEM_MOD_STAMINA_SHORT = 1 } },
+    [9011] = { "Old Tunic", "INVTYPE_CHEST", 4, 3, 10, 15, { ITEM_MOD_STAMINA_SHORT = 2 } },
+    [9012] = { "Worn Mace", "INVTYPE_WEAPON", 2, 4, 10, 15, { ITEM_MOD_DAMAGE_PER_SECOND_SHORT = 5, ITEM_MOD_STRENGTH_SHORT = 1 } },
+    [9001] = { "Militia Leggings", "INVTYPE_LEGS", 4, 3, 18, 23, { ITEM_MOD_STRENGTH_SHORT = 5, ITEM_MOD_STAMINA_SHORT = 4, RESISTANCE0_NAME = 100 }, false },
+    [9005] = { "Apprentice Wand", "INVTYPE_RANGEDRIGHT", 2, 19, 15, 20, { ITEM_MOD_DAMAGE_PER_SECOND_SHORT = 10 } },
+    [9004] = { "Silver Ring", "INVTYPE_FINGER", 4, 0, 18, 22, { ITEM_MOD_STRENGTH_SHORT = 3 } },
+    [5193] = { "Cape of the Brotherhood", "INVTYPE_CLOAK", 4, 1, 19, 24, { ITEM_MOD_AGILITY_SHORT = 3, ITEM_MOD_STAMINA_SHORT = 3 } },
+    [10399] = { "Blackened Defias Armor", "INVTYPE_CHEST", 4, 2, 21, 26, { ITEM_MOD_AGILITY_SHORT = 8, ITEM_MOD_STAMINA_SHORT = 8, RESISTANCE0_NAME = 80 } },
+    [872] = { "Rockslicer", "INVTYPE_2HWEAPON", 2, 1, 19, 24, { ITEM_MOD_DAMAGE_PER_SECOND_SHORT = 15, ITEM_MOD_STRENGTH_SHORT = 10 } },
+}
+for id, g in pairs(gear) do
+    if g[8] == nil then g[8] = true end
+    itemCache[id] = itemCache[id] or g[1]
+end
+local function gearLink(id) return "|cff1eff00|Hitem:" .. id .. "::|h[" .. gear[id][1] .. "]|h|r" end
+local equipped = { [7] = 9010, [5] = 9011, [16] = 9012 }
+function GetInventoryItemLink(_, slot) return equipped[slot] and gearLink(equipped[slot]) end
+local talents = { 11, 0, 0 }
+function GetNumTalentTabs() return 3 end
+function GetTalentTabInfo(i) return ({ "Arms", "Fury", "Protection" })[i], "icon", talents[i] end
 C_Item = {
     GetItemNameByID = function(id) return itemCache[id] end,
     RequestLoadItemDataByID = function() end,
     GetItemCount = function(id) return bags[id] or 0 end,
     GetItemInfo = function(id)
+        if type(id) == "string" then id = tonumber(id:match("item:(%d+)")) end
         if id == 2589 then return "Linen Cloth", "|cffffffff|Hitem:2589::|h[Linen Cloth]|h|r", 1, 5, 0, "Trade Goods", "Cloth", 20, "", 0, 13 end
+        local g = gear[id]
+        if g and g[8] then return g[1], gearLink(id), 2, g[6], g[5] end
+    end,
+    GetItemInfoInstant = function(id)
+        if type(id) == "string" then id = tonumber(id:match("item:(%d+)")) end
+        local g = gear[id]
+        if g then return id, nil, nil, g[2], nil, g[3], g[4] end
+    end,
+    GetItemStats = function(link)
+        local id = tonumber(tostring(link):match("item:(%d+)"))
+        return gear[id] and gear[id][7] or {}
     end,
 }
 
@@ -333,7 +377,7 @@ AtlasLoot = {
 }
 
 -- Auctionator: a price database, and a search that finds `ahListings` while the AH is open
-local ahPrices, ahAges = { [2589] = 1250 }, { [2589] = 0 }
+local ahPrices, ahAges = { [2589] = 1250, [9004] = 5000 }, { [2589] = 0, [9004] = 0 }
 local ahListings = {}   -- item name -> price the next search will find
 local searches = 0
 local dbUpdated
@@ -636,6 +680,38 @@ ask("where should i level herbalism", { "You don't have Herbalism yet. Starter n
 ask("where are cold iron deposit nodes", { "Cold Iron Deposit|r <Mining> - Redridge" })
 ask("where can i get linen cloth", "Linen Cloth", { "Vein", "Peacebloom" })
 
+-- Gear upgrades -----------------------------------------------------------------------------
+-- You wear weak legs, an old tunic and a 1H mace; no rings or cloak. Talents: Arms (11/0/0).
+-- The quest reward legs aren't in the item cache yet, so the answer waits for the server.
+ask("upgrades", { "Checking 1 items" }, { "Upgrades for" })
+gear[9001][8] = true
+do
+    local from = #output + 1
+    fire("GET_ITEM_INFO_RECEIVED", 9001, true)
+    local text = table.concat(output, "\n", from)
+    for _, e in ipairs({ "Upgrades for Arms Warrior, level 20:", "Legs: ", "Militia Leggings", "+514%",
+        "quest |cffffd100Blackrock Menace|r, from Martie Jainrose (Redridge Mountains",
+        "Two-hander: ", "Rockslicer", "(train Two-Handed Axes)", "[weapon master]",
+        "Chest: ", "Blackened Defias Armor", "(at 21)", "The Deadmines",
+        "Back: ", "Cape of the Brotherhood", "empty slot", "Edwin VanCleef|r |cff66cc3323%",
+        "Ring: ", "Silver Ring", "AH " }) do
+        if not text:find(e, 1, true) then failures = failures + 1; print("   !! FAIL: expected " .. e) end
+    end
+    for _, r in ipairs({ "Apprentice Wand", "Guessing", "Checking" }) do
+        if text:find(r, 1, true) then failures = failures + 1; print("   !! FAIL: did not expect " .. r) end
+    end
+end
+if lastPinTitle ~= "Martie Jainrose (upgrade)" then failures = failures + 1; print("   !! FAIL: pinned " .. tostring(lastPinTitle)) end
+ask("upgrades legs", { "(legs)", "Militia Leggings" }, { "Rockslicer", "Silver Ring" })
+ask("better weapon", { "Two-hander: ", "Rockslicer" }, { "Militia" })
+ask("upgrades as tank", { "Upgrades for Protection Warrior" }, { "Guessing" })
+talents = { 0, 0, 0 }
+ask("what gear should i get", { "Upgrades for Arms Warrior", "Guessing Arms (no talent points spent yet)",
+    "/ab upgrades as fury, prot" })
+talents = { 11, 0, 0 }
+ask("debug item 9001", { "slot legs", "needs level 18", "ITEM_MOD_STRENGTH_SHORT=5", "score for Arms: 8.6" })
+ask("nearest weapon master", "Weapon Master", { "Upgrades for" })
+
 -- Settings and "!ask" from other players --------------------------------------------------
 local function expectChat(label, fn, expect, reject)
     local from = #sentChat + 1
@@ -681,7 +757,11 @@ end, { "Mage trainer" }, { "Warrior" })
 advance(10)
 expectChat("guild: quest log questions need their own AskBot", function()
     fire("CHAT_MSG_GUILD", "!ask what's next", "Guildie-Realm")
-end, { "[AskBot] I can't see your quest log" })
+end, { "[AskBot] That one needs your own quest log or gear" })
+advance(10)
+expectChat("guild: gear questions need their own AskBot too", function()
+    fire("CHAT_MSG_GUILD", "!ask what gear should i get", "Guildie-Realm")
+end, { "[AskBot] That one needs your own quest log or gear" })
 advance(10)
 expectChat("guild: real item links survive", function()
     fire("CHAT_MSG_GUILD", "!ask price of linen cloth", "Guildie-Realm")

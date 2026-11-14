@@ -16,6 +16,8 @@ local D = {
     questInfo = {},     -- quest id -> { level, req, max, npcs, objects } for quests with a giver
     unlocks = {},       -- quest id -> quests that list it as a prerequisite
     givenBy = {},       -- item id -> quests that hand it to you when you take them
+    questRewardItems = {}, -- quest id -> items it rewards
+    gearItems = {},     -- list of { itemId, requiredLevel } for weapons and armour
     rares = {},         -- npc id -> rank (2 = rare elite, 4 = rare)
     gather = {},        -- node name -> { name, prof, skill, special, items, ids }
     gatherKeys = {},    -- name key (node or item) -> { display, nodes = { node names } }
@@ -326,7 +328,7 @@ local YIELD_EVERY = 400
 function D.BuildIndex()
     local npcIds, questIds, itemIds = NpcDB.GetAllIds(), QuestDB.GetAllIds(), ItemDB.GetAllIds()
     local objectIds = ObjectDB.GetAllIds and ObjectDB.GetAllIds() or {}
-    local total = #npcIds * 2 + #questIds * 2 + #itemIds + #objectIds
+    local total = #npcIds * 2 + #questIds * 2 + #itemIds * 2 + #objectIds
     local done = 0
     local function step()
         done = done + 1
@@ -383,6 +385,22 @@ function D.BuildIndex()
     indexNames(NpcDB, npcIds, D.npcNames)
     indexNames(QuestDB, questIds, D.questNames)
     indexNames(ItemDB, itemIds, D.itemNames, D.itemIds)
+
+    -- Gear and quest rewards, for "/ab upgrades"
+    local classOf, reqOf = ItemDB.class, ItemDB.requiredLevel
+    for i = 1, #itemIds do
+        local id = itemIds[i]
+        local cls = classOf and classOf(id)
+        if cls == 2 or cls == 4 then
+            D.gearItems[#D.gearItems + 1] = { id, (reqOf and reqOf(id)) or 0 }
+            for _, q in ipairs(ItemDB.questRewards(id) or {}) do
+                local list = D.questRewardItems[q]
+                if not list then list = {}; D.questRewardItems[q] = list end
+                list[#list + 1] = id
+            end
+        end
+        step()
+    end
 
     -- Gathering nodes: mining veins, herbs, fishing schools
     for i = 1, #objectIds do

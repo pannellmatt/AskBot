@@ -125,7 +125,7 @@ local function replyLines(question, sender)
         out[1] = "Ask me where things are, e.g. \"!ask nearest flight master\", \"!ask who gives <quest>\", "
             .. "\"!ask where does Linen Cloth drop\", \"!ask what does VanCleef drop\"."
     elseif AskBot.IsPersonalQuestion(question) then
-        out[1] = "I can't see your quest log. Install AskBot and use /ab for that one."
+        out[1] = "That one needs your own quest log or gear. Install AskBot and use /ab for it."
     else
         for _, line in ipairs(AskBot.AnswerFor(question, findAsker(sender))) do
             local text = AskBot.ToChatText(line)

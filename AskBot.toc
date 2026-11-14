@@ -15,5 +15,6 @@ Gathering.lua
 Options.lua
 Data.lua
 Integrations.lua
+Gear.lua
 AskBot.lua
 Sharing.lua

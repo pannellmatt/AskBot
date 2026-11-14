@@ -1369,6 +1369,172 @@ local function answerRares()
 end
 
 --------------------------------------------------------------------------------------------
+-- Gear upgrades: "/ab upgrades", "/ab upgrades legs", "I'm a feral druid, what gear..."
+--------------------------------------------------------------------------------------------
+
+local function wordSet(q)
+    local w = {}
+    for word in q:gmatch("%S+") do w[word] = true end
+    return w
+end
+
+--- A gear question returns the slot groups it names (possibly none) and its words; else nil.
+local function gearQuestion(q)
+    local words = wordSet(q)
+    local slots = {}
+    for word in pairs(words) do
+        for _, g in ipairs(AskBot.Gear.SLOT_WORDS[word] or {}) do slots[#slots + 1] = g end
+    end
+    for phrase, g in pairs({ ["off hand"] = "offhand", ["main hand"] = "onehand", ["two hand"] = "twohand",
+        ["one hand"] = "onehand" }) do
+        if q:find(phrase, 1, true) then slots[#slots + 1] = g end
+    end
+    local gearWord = words.upgrade or words.upgrades or words.gear or words.bis or words.equipment or words.wear
+    local asksBetter = words.better or words.best or q:find("should i get", 1, true) or q:find("should i go for", 1, true)
+        or q:find("should i use", 1, true)
+    if gearWord or (asksBetter and #slots > 0) then return slots, words end
+end
+
+local SOURCE_ORDER = { quest = 1, boss = 2, ah = 3 }
+
+--- "quest Foo, from Gryan (Westfall, ~1 min) [pin]" for an upgrade's best source, and the
+--- ranked place to pin.
+local function upgradeSource(c)
+    table.sort(c.sources, function(a, b)
+        if a.kind ~= b.kind then return SOURCE_ORDER[a.kind] < SOURCE_ORDER[b.kind] end
+        if a.kind == "quest" and (a.inLog or false) ~= (b.inLog or false) then return a.inLog or false end
+        if a.kind == "boss" then return (a.rate or 0) > (b.rate or 0) end
+        return false
+    end)
+    local s = c.sources[1]
+    local text, best
+    if s.kind == "quest" then
+        local places
+        if s.inLog then
+            places = turnInPlaces(s.quest)
+        else
+            local who = QuestDB.startedBy(s.quest) or {}
+            places = questPlaces(s.quest, who[1], who[2], true)
+        end
+        best = D.Rank(places)[1]
+        text = "quest " .. GOLD .. (QuestDB.name(s.quest) or "?") .. "|r" .. (s.inLog and " (in your log)" or "")
+        if best then
+            text = text .. (s.inLog and ", hand in to " or ", from ") .. best.place.name .. " (" .. D.ZoneName(best.spawn.uiMapId)
+                .. ", " .. shortHow(best) .. ") " .. pinLink(best.place, best.spawn, QuestDB.name(s.quest))
+        end
+    elseif s.kind == "boss" then
+        local inst = s.boss.instance
+        local entrance = AskBot.Loot.EntrancePlace(inst)
+        best = entrance and D.Rank({ entrance })[1]
+        text = GOLD .. s.boss.name .. "|r" .. formatRate(s.rate) .. ", " .. inst.name
+        if best then text = text .. " (" .. shortHow(best) .. ") " .. pinLink(best.place, best.spawn, inst.name) end
+    else
+        text = "AH " .. AskBot.Prices.Format(s.price)
+    end
+    if #c.sources > 1 then text = text .. GREY .. " (+" .. (#c.sources - 1) .. " more)|r" end
+    return text, best
+end
+
+local function answerUpgrades(slots, words)
+    local G = AskBot.Gear
+    local classFile = askerClass()
+    local level = askerLevel()
+    local spec, how, summary = G.Spec(classFile, words)
+    if not spec then return say("I don't know that class's specs.") end
+    local className = UnitClass("player") or classFile
+
+    local quests, inLog = {}, {}
+    for _, q in ipairs(questLogEntries()) do
+        inLog[q.id] = true
+        quests[#quests + 1] = q.id
+    end
+    for _, id in ipairs(doableQuests(level + 5)) do quests[#quests + 1] = id end
+    local candidates = G.Candidates({ classFile = classFile, level = level, quests = quests, inLog = inLog })
+    if #slots > 0 then
+        local wanted = {}
+        for _, g in ipairs(slots) do wanted[g] = true end
+        local kept = {}
+        for _, c in ipairs(candidates) do if wanted[c.group] then kept[#kept + 1] = c end end
+        candidates = kept
+    end
+
+    local function show()
+        local current = G.Current(spec.weights, classFile)
+        local results = {}
+        for _, c in ipairs(candidates) do
+            local cur = current[c.group]
+            local score = cur and G.Score(c.id, spec.weights, c.group == "ranged")
+            if score then
+                local gain = score - cur.score
+                if gain > math.max(0.5, cur.score * 0.03) then
+                    c.gain, c.current = gain, cur.score
+                    results[#results + 1] = c
+                end
+            end
+        end
+        table.sort(results, function(a, b) return a.gain > b.gain end)
+
+        -- Best per slot (or the top few for the slot asked about).
+        local perGroup = #slots > 0 and 3 or 1
+        local shown, count = {}, {}
+        for _, c in ipairs(results) do
+            if (count[c.group] or 0) < perGroup then
+                count[c.group] = (count[c.group] or 0) + 1
+                shown[#shown + 1] = c
+            end
+        end
+
+        local where = #slots > 0 and (" (" .. G.GROUP_LABELS[slots[1]]:lower() .. ")") or ""
+        say("Upgrades for " .. spec.name .. " " .. className .. where .. ", level " .. level .. ":")
+        if #shown == 0 then
+            say(GREY .. "  Nothing better from quests you can do, dungeons near your level"
+                .. (AskBot.Prices.Available() and " or the auction house" or "") .. ", up to level " .. (level + 5) .. ".|r")
+        end
+        local firstBest
+        for i = 1, math.min(#shown, AskBot.Option("maxResults") + 3) do
+            local c = shown[i]
+            local gain = c.current > 0 and ("+" .. math.floor(c.gain / c.current * 100 + 0.5) .. "%") or "empty slot"
+            local extra = ""
+            if c.req and c.req > level then extra = extra .. GREY .. " (at " .. c.req .. ")|r" end
+            if c.needs then
+                extra = extra .. " |cffff8040(" .. c.needs .. ")|r"
+                if c.needs:find("^train ") then
+                    local isArmor = c.needs:find("Mail") or c.needs:find("Shield") or c.needs:find("Leather")
+                    local question = isArmor and "my class trainer" or "nearest weapon master"
+                    extra = extra .. " " .. makeLink(isArmor and "trainer" or "weapon master", function() AskBot.Ask(question) end)
+                end
+            end
+            local sourceText, best = upgradeSource(c)
+            -- Pin the best upgrade you can use now (not one that needs training or levels).
+            if not c.needs and not (c.req and c.req > level) then firstBest = firstBest or best end
+            say("  " .. G.GROUP_LABELS[c.group] .. ": " .. itemLinkText(c.id) .. " " .. gain .. extra .. " - " .. sourceText)
+        end
+        if how == "guess" then
+            local others = {}
+            for _, s in ipairs(G.SPECS[classFile]) do
+                if s ~= spec then others[#others + 1] = s.words[1] end
+            end
+            local why = ""
+            if summary and summary:find("[1-9]") then why = " from your talents (" .. summary .. ")"
+            elseif summary then why = " (no talent points spent yet)" end
+            say(GREY .. "  Guessing " .. spec.name .. why
+                .. ". For another spec: /ab upgrades as " .. table.concat(others, ", ") .. ".|r")
+        end
+        if firstBest then autoPin(firstBest.place, firstBest.spawn, "upgrade") end
+    end
+
+    local ids = {}
+    for _, c in ipairs(candidates) do ids[#ids + 1] = c.id end
+    local fetching = G.Load(ids, function()
+        xpcall(show, function(err)
+            say("Something went wrong answering that: " .. tostring(err))
+            if geterrorhandler then geterrorhandler()(err) end
+        end)
+    end)
+    if fetching > 0 then say(GREY .. "Checking " .. fetching .. " items with the server...|r") end
+end
+
+--------------------------------------------------------------------------------------------
 -- Gathering: mining veins, herbs, fishing schools
 --------------------------------------------------------------------------------------------
 
@@ -1898,6 +2064,9 @@ local function answer(question)
         return answerItem(nil, mode, hits)
     end
 
+    local gearSlots, gearWords = gearQuestion(q)
+    if gearSlots then return answerUpgrades(gearSlots, gearWords) end
+
     for _, entry in ipairs(SPECIAL) do
         for _, pattern in ipairs(entry[2]) do
             local found, _, arg = q:find(pattern)
@@ -2107,6 +2276,7 @@ local function help()
     say("  /askbot what does VanCleef drop    /askbot Deadmines loot    /askbot price of Linen Cloth")
     say("  /askbot what do I need before [quest]    /askbot what comes after [quest]")
     say("  /askbot where can I mine copper    /askbot Peacebloom    /askbot where should I mine")
+    say("  /askbot upgrades    /askbot upgrades legs    /askbot what gear should I get as a feral druid")
     say("Click " .. "|cff71d5ff[pin]|r" .. " on any answer to put a pin on it.")
     say("/askbot clear - remove the pin.  /askbot status - index info.  Also /ab and /ask.")
     say("/askbot refresh prices - re-check prices you've asked about (now at the AH, or on your next visit).")
@@ -2138,6 +2308,31 @@ local function status()
     end
 end
 
+
+--- /ab debug item <link or ID>: the stats the game reports for an item, and how AskBot scores it.
+local function debugItem(text)
+    local id = tonumber(text:match("|Hitem:(%d+)") or text:match("^%s*(%d+)%s*$"))
+    if not id then return say("Which item? /ab debug item [item link or ID]") end
+    local G = AskBot.Gear
+    AskBot.Gear.Load({ id }, function()
+        local classFile = askerClass()
+        local spec = G.Spec(classFile, {})
+        local group, req, needs = G.Check(id, classFile, askerLevel(), G.Skills())
+        local getInfo = (C_Item and C_Item.GetItemInfo) or GetItemInfo
+        local link = getInfo and select(2, getInfo(id))
+        say("Item " .. id .. " " .. itemLinkText(id) .. ": slot " .. tostring(group) .. ", needs level " .. tostring(req)
+            .. (needs and (", " .. needs) or ""))
+        local parts = {}
+        local getStats = (C_Item and C_Item.GetItemStats) or GetItemStats
+        local ok, stats = pcall(getStats, link)
+        for stat, value in pairs(ok and type(stats) == "table" and stats or {}) do
+            parts[#parts + 1] = stat .. (G.STAT_KEYS[stat] and "" or "(?)") .. "=" .. tostring(value)
+        end
+        table.sort(parts)
+        say("  stats: " .. (#parts > 0 and table.concat(parts, ", ") or "none reported"))
+        say("  score for " .. (spec and spec.name or "?") .. ": " .. tostring(spec and link and G.Score(link, spec.weights, group == "ranged")))
+    end)
+end
 
 --- /ab debug quest <link or name>: what Questie's data holds for a quest's objectives.
 local function debugQuest(text)
@@ -2228,6 +2423,9 @@ local function onSlash(msg, editBox)
         end
     elseif cmd:match("^share") then
         shareCommand(cmd)
+    elseif cmd:match("^debug item") then
+        if D.status ~= "ready" then return say("Still loading, try again in a moment.") end
+        debugItem(msg:sub(11))
     elseif cmd:match("^debug quest") then
         if D.status ~= "ready" then return say("Still loading, try again in a moment.") end
         debugQuest(msg:sub(12))
@@ -2253,9 +2451,10 @@ function AskBot.Ask(msg)
 end
 
 
---- Questions only the asker's own AskBot can answer (they need their quest log).
+--- Questions only the asker's own AskBot can answer (they need their quest log or gear).
 function AskBot.IsPersonalQuestion(question)
     local q = normalize(question)
+    if gearQuestion(q) then return true end
     for _, entry in ipairs(SPECIAL) do
         if entry[1] == "next" or entry[1] == "questsHere" or entry[1] == "questNext" or entry[1] == "zones" then
             for _, pattern in ipairs(entry[2]) do
