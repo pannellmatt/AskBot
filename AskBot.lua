@@ -941,6 +941,71 @@ end
 -- not suggested as places to level.
 local CAPITALS = { [1453] = true, [1455] = true, [1457] = true, [1454] = true, [1456] = true, [1458] = true }
 
+--- For /ab zones debug: every quest given in the zone you're in, sorted by why it does or
+--- doesn't count towards the zone suggestions.
+local function explainCurrentZone(level)
+    local mapId = C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
+    local info = mapId and C_Map.GetMapInfo(mapId)
+    -- Sub-zone maps (towns, caves) roll up to their zone.
+    while info and info.mapType and info.mapType > 3 and info.parentMapID and info.parentMapID > 0 do
+        mapId = info.parentMapID
+        info = C_Map.GetMapInfo(mapId)
+    end
+    if not mapId then return say(GREY .. "(I can't tell which zone you're in.)|r") end
+
+    local QuestieDBModule = QuestieLoader and QuestieLoader:ImportModule("QuestieDB")
+    local isDoable = QuestieDBModule and QuestieDBModule.IsDoable
+    local isTrivial = QuestieDBModule and QuestieDBModule.IsTrivial
+    local isCompleted = (C_QuestLog and C_QuestLog.IsQuestFlaggedCompleted) or IsQuestFlaggedCompleted
+    local inLog = {}
+    for _, q in ipairs(questLogEntries()) do inLog[q.id] = true end
+
+    local order = { "counted", "done", "inLog", "tooHigh", "grey", "hostile", "unavailable" }
+    local labels = {
+        counted = "counted", done = "already done", inLog = "in your log", tooHigh = "need a higher level",
+        grey = "too easy (grey)", hostile = "from NPCs hostile to you",
+        unavailable = "not available yet (Questie: prerequisites, class, reputation...)",
+    }
+    local buckets, total = {}, 0
+    for _, k in ipairs(order) do buckets[k] = {} end
+    for id, qi in pairs(D.questInfo) do
+        local giver = placesForIds(qi.npcs, qi.objects)[1]
+        local spawn = giver and giver.spawns[1]
+        if spawn and spawn.uiMapId == mapId then
+            total = total + 1
+            local req = (qi.req and qi.req > 0) and qi.req or qi.level or 1
+            local bucket
+            if inLog[id] then
+                bucket = "inLog"
+            elseif isCompleted and isCompleted(id) then
+                bucket = "done"
+            elseif req > level or (qi.max and qi.max > 0 and level > qi.max) then
+                bucket = "tooHigh"
+            elseif isTrivial and select(2, pcall(isTrivial, qi.level)) == true then
+                bucket = "grey"
+            elseif not placesForIds(qi.npcs, qi.objects, true)[1] then
+                bucket = "hostile"
+            elseif isDoable and select(2, pcall(isDoable, id)) ~= true then
+                bucket = "unavailable"
+            else
+                bucket = "counted"
+            end
+            table.insert(buckets[bucket], id)
+        end
+    end
+
+    say(GREY .. "Quests given in|r " .. GOLD .. D.ZoneName(mapId) .. "|r" .. GREY .. ": " .. total .. "|r")
+    for _, k in ipairs(order) do
+        local ids = buckets[k]
+        if #ids > 0 then
+            table.sort(ids, function(a, b) return (QuestDB.questLevel(a) or 0) < (QuestDB.questLevel(b) or 0) end)
+            local names = {}
+            for j = 1, math.min(4, #ids) do names[j] = questLabel(ids[j]) end
+            say("  " .. #ids .. " " .. labels[k] .. ": " .. table.concat(names, ", ") .. (#ids > 4 and (GREY .. " ...|r") or ""))
+        end
+    end
+end
+
 --- Zones worth questing in: the most quests you can take near your level, weighed by how
 --- far away the zone is, each with its busiest quest giver as the place to start.
 --- With `debug`, also prints the numbers behind the ranking.
@@ -950,13 +1015,40 @@ local function answerZones(level, ids, maxZones, debug)
     maxZones = maxZones or 3
 
     local zones = {}
+    local function zoneFor(map)
+        local z = zones[map]
+        if not z then
+            z = { map = map, quests = {}, levels = {}, givers = {}, fit = 0, active = {} }
+            zones[map] = z
+        end
+        return z
+    end
+
+    -- Quests already in your log count where their next step is (the nearest unfinished
+    -- objective, or the turn-in once complete), and count more than new quests.
+    if not AskBot.asker then
+        for _, q in ipairs(questLogEntries()) do
+            local complete, objectives, turnIn = questTasks(q.id)
+            local nextStep
+            if not complete then
+                for _, o in ipairs(objectives) do
+                    if o.best and (not nextStep or quicker(o.best, nextStep)) then nextStep = o.best end
+                end
+            end
+            nextStep = nextStep or turnIn
+            if nextStep and nextStep.spawn and not CAPITALS[nextStep.spawn.uiMapId] then
+                local z = zoneFor(nextStep.spawn.uiMapId)
+                z.active[#z.active + 1] = { id = q.id, r = nextStep }
+            end
+        end
+    end
+
     for _, id in ipairs(ids) do
         local info = D.questInfo[id]
         local giver = placesForIds(info.npcs, info.objects, true)[1]
         local spawn = giver and giver.spawns[1]
         if spawn and not CAPITALS[spawn.uiMapId] then
-            local z = zones[spawn.uiMapId]
-            if not z then z = { map = spawn.uiMapId, quests = {}, levels = {}, givers = {}, fit = 0 }; zones[spawn.uiMapId] = z end
+            local z = zoneFor(spawn.uiMapId)
             local ql = info.level or 0
             z.quests[#z.quests + 1] = id
             z.levels[#z.levels + 1] = ql
@@ -968,12 +1060,12 @@ local function answerZones(level, ids, maxZones, debug)
         end
     end
 
-    -- Score by quests (those near your level count double), then weigh the best few by
-    -- travel time to their hub: 5 minutes away halves a zone's score.
+    -- Score: your current quests count 3, new quests near your level 2, other new quests 1.
+    -- Then weigh the best few by travel time: 5 minutes away halves a zone's score.
     local list = {}
     for _, z in pairs(zones) do
-        if #z.levels >= 3 then
-            z.questScore = z.fit * 2 + #z.levels
+        if #z.levels + #z.active >= 3 then
+            z.questScore = #z.active * 3 + z.fit * 2 + (#z.levels - z.fit)
             for _, g in pairs(z.givers) do
                 if not z.hub or g.n > z.hub.n then z.hub = g end
             end
@@ -987,7 +1079,11 @@ local function answerZones(level, ids, maxZones, debug)
     table.sort(list, function(a, b) return a.questScore > b.questScore end)
     for i = #list, 13, -1 do list[i] = nil end -- only the best dozen are worth timing
     for _, z in ipairs(list) do
-        z.r = D.Rank({ z.hub.place })[1]
+        -- Where to go: your nearest quest step there, else the busiest new quest giver.
+        for _, a in ipairs(z.active) do
+            if not z.activeR or quicker(a.r, z.activeR) then z.activeR = a.r end
+        end
+        z.r = z.activeR or (z.hub and D.Rank({ z.hub.place })[1])
         local minutes = (z.r and z.r.time or 1800) / 60
         z.score = z.questScore / (1 + minutes / 5)
     end
@@ -997,28 +1093,41 @@ local function answerZones(level, ids, maxZones, debug)
     local firstHub
     for i = 1, math.min(maxZones, #list) do
         local z = list[i]
-        table.sort(z.levels)
-        local lo = z.levels[math.floor(#z.levels * 0.15) + 1]
-        local hi = z.levels[math.max(1, math.ceil(#z.levels * 0.85))]
+        local levels = {}
+        for _, l in ipairs(z.levels) do levels[#levels + 1] = l end
+        for _, a in ipairs(z.active) do levels[#levels + 1] = QuestDB.questLevel(a.id) or 0 end
+        table.sort(levels)
+        local lo = levels[math.floor(#levels * 0.15) + 1]
+        local hi = levels[math.max(1, math.ceil(#levels * 0.85))]
+        local counts = {}
+        if #z.active > 0 then counts[#counts + 1] = #z.active .. " of your quests" end
+        if #z.levels > 0 then counts[#counts + 1] = #z.levels .. " new quest" .. (#z.levels == 1 and "" or "s") end
         local zoneName = D.ZoneName(z.map)
-        say("  " .. GOLD .. zoneName .. "|r: " .. #z.levels .. " quests for you"
+        say("  " .. GOLD .. zoneName .. "|r: " .. table.concat(counts, " + ")
             .. (lo > 0 and (" (mostly level " .. lo .. (hi > lo and ("-" .. hi) or "") .. ")") or ""))
-        if z.r then
+        if z.activeR then
+            say("      continue at " .. describe(z.activeR, zoneName))
+        elseif z.r then
             say("      start at " .. describe(z.r, zoneName) .. GREY .. " - " .. z.hub.n .. " quest" .. (z.hub.n == 1 and "" or "s") .. "|r")
-            firstHub = firstHub or z.r
         end
+        firstHub = firstHub or z.r
     end
 
     if debug then
-        say(GREY .. "How these were ranked (quests near your level count double; 5 min of travel halves the score):|r")
+        explainCurrentZone(level)
+        say(GREY .. "How these were ranked (your quests count 3, new ones near your level 2, others 1;"
+            .. " 5 min of travel halves the score):|r")
         for i = 1, math.min(8, #list) do
             local z = list[i]
             local names = {}
+            for _, a in ipairs(z.active) do names[#names + 1] = questLabel(a.id) .. GREY .. " (yours)|r" end
             table.sort(z.quests, function(a, b) return (QuestDB.questLevel(a) or 0) < (QuestDB.questLevel(b) or 0) end)
-            for j = 1, math.min(4, #z.quests) do names[j] = questLabel(z.quests[j]) end
-            say(string.format("  %s: %d quests, %d near your level, %s away, score %.1f", D.ZoneName(z.map), #z.levels, z.fit,
-                z.r and z.r.time and formatTime(z.r.time) or "unknown", z.score))
-            say("      " .. table.concat(names, ", ") .. (#z.quests > 4 and (GREY .. " ...|r") or ""))
+            for _, id in ipairs(z.quests) do names[#names + 1] = questLabel(id) end
+            local shown = {}
+            for j = 1, math.min(4, #names) do shown[j] = names[j] end
+            say(string.format("  %s: %d of yours, %d new (%d near your level), %s away, score %.1f", D.ZoneName(z.map),
+                #z.active, #z.levels, z.fit, z.r and z.r.time and formatTime(z.r.time) or "unknown", z.score))
+            say("      " .. table.concat(shown, ", ") .. (#names > 4 and (GREY .. " ...|r") or ""))
         end
     end
     return firstHub

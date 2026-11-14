@@ -445,22 +445,29 @@ ask("what's next", { "Ready to hand in:", "The Defias Brotherhood", "Gryan Stout
 ask("quests here", { "Quests you can pick up (10 on this continent)", "Gryan Stoutmantle", "Patrolling Westfall",
     "Wanted Poster", "Bounty on Murlocs" }, { "Too Easy", "Too Hard", "Already Done", "Defias Brotherhood" })
 ask("what quests can i get", "Patrolling Westfall")
--- Zones: at level 20 Redridge (quests 18-22) beats Westfall (quests 12-16) and Darkshore (as
--- good, but across the sea). Horde givers' quests and capital cities are never suggested.
+-- Zones at level 20, standing in Westfall with two Westfall quests in the log:
+-- Westfall first (your quests are there), then Redridge (new quests 18-22, plus one of yours),
+-- then Darkshore (as good, but across the sea). Horde givers' quests and capitals never appear.
 do
     local from = #output + 1
-    ask("where should i level", { "Best zones to quest in at level 20:", "Redridge Mountains|r: 3 quests for you (mostly level 18-22)",
-        "start at |cffffd100Martie Jainrose", "Westfall|r: 4 quests for you", "Darkshore|r: 3 quests" },
+    ask("where should i level", { "Best zones to quest in at level 20:",
+        "Westfall|r: 2 of your quests + 4 new quests", "continue at ",
+        "Redridge Mountains|r: 1 of your quests + 3 new quests (mostly level 15-22)", "Scout the Redridge camp",
+        "Darkshore|r: 3 new quests" },
         { "The Barrens", "Stormwind City|r:", "Horde Errand" })
     local text = table.concat(output, "\n", from)
     local function pos(s) return text:find(s, 1, true) or math.huge end
-    if not (pos("Redridge Mountains|r:") < pos("Darkshore|r:")) then
-        failures = failures + 1; print("   !! FAIL: Redridge should rank above Darkshore at level 20")
+    if not (pos("Westfall|r:") < pos("Redridge Mountains|r:") and pos("Redridge Mountains|r:") < pos("Darkshore|r:")) then
+        failures = failures + 1; print("   !! FAIL: expected Westfall, then Redridge, then Darkshore")
     end
 end
-ask("zones debug", { "How these were ranked", "near your level", "away, score" }, { "The Barrens" })
+-- Debug: explains the zone you're in (Westfall) and the ranking
+C_Map.GetBestMapForUnit = function() return 1436 end
+ask("zones debug", { "|cffffd100Westfall|r|cffaaaaaa: 10", "counted", "in your log", "too easy (grey)",
+    "How these were ranked", "of yours", "away, score" }, { "The Barrens" })
 ask("quests here", "Quests you can pick up", { "Thork", "Horde Errand" })
-ask("zones for level 14", { "Best zones to quest in at level 14:", "Westfall|r: 4 quests for you" }, { "Redridge", "Too Easy" })
+ask("zones for level 14", { "Best zones to quest in at level 14:", "Westfall|r: 2 of your quests + 4 new quests" },
+    { "Too Easy" })
 ask("where should i quest next?", { "Best zones to quest in at level 20:", "Redridge Mountains", "Quests you can pick up",
     "Wanted Poster" })
 ask("dungeons", { "Dungeons for level 20:", "The Deadmines|r (10-26)", "[loot]", "entrance Westfall 42.6, 71.8" },
