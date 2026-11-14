@@ -309,37 +309,55 @@ local function questObjectives(id)
     return list
 end
 
-local function answerQuestInLog(id, name)
-    local complete = questComplete(id)
-    say("Quest " .. GOLD .. name .. "|r " .. (complete and "is complete:" or "is in progress:"))
+--- Sort helper: ranked results by travel time, unknown times last.
+local function quicker(a, b)
+    if a.time and b.time then return a.time < b.time end
+    return a.time ~= nil and b.time == nil
+end
 
-    local nearest
+--- What's left to do for a quest in the log: complete?, unfinished objectives
+--- ({ verb, name, best = ranked result or nil, showLevel }), and the turn-in result.
+local function questTasks(id)
+    local complete = questComplete(id)
+    local objectives = {}
     if not complete then
         local done = finishedObjectiveTexts(id)
-        local function isDone(objName)
-            local n = objName:lower()
-            for _, t in ipairs(done) do if t:find(n, 1, true) then return true end end
-            return false
-        end
         for _, obj in ipairs(questObjectives(id)) do
-            local verb, objName, places, showLevel = obj[1], obj[2], obj[3], obj[4]
-            if not isDone(objName) then
-                local best = #places > 0 and D.Rank(places)[1]
-                if best then
-                    local prefix = verb == "Collect" and ("Collect " .. GOLD .. objName .. "|r from: ") or (verb .. ": ")
-                    say("  " .. prefix .. describe(best, objName, showLevel))
-                    if not nearest or (best.time and (not nearest.time or best.time < nearest.time)) then
-                        nearest = best
-                    end
-                else
-                    say("  " .. verb .. " " .. GOLD .. objName .. "|r " .. GREY .. "(Questie doesn't know where)|r")
-                end
+            local objName = obj[2]
+            local finished = false
+            for _, t in ipairs(done) do
+                if t:find(objName:lower(), 1, true) then finished = true; break end
+            end
+            if not finished then
+                objectives[#objectives + 1] = {
+                    verb = obj[1], name = objName, showLevel = obj[4],
+                    best = #obj[3] > 0 and D.Rank(obj[3])[1] or nil,
+                }
             end
         end
     end
-
     local who = QuestDB.finishedBy(id) or {}
-    local turnIn = D.Rank(placesForIds(who[1], who[2]))[1]
+    return complete, objectives, D.Rank(placesForIds(who[1], who[2]))[1]
+end
+
+--- "Collect Linen Cloth from: Defias Thug lvl 9-10 - Westfall ... [pin]"
+local function objectiveText(o)
+    if not o.best then
+        return o.verb .. " " .. GOLD .. o.name .. "|r " .. GREY .. "(Questie doesn't know where)|r"
+    end
+    local prefix = o.verb == "Collect" and ("Collect " .. GOLD .. o.name .. "|r from: ") or (o.verb .. ": ")
+    return prefix .. describe(o.best, o.name, o.showLevel)
+end
+
+local function answerQuestInLog(id, name)
+    local complete, objectives, turnIn = questTasks(id)
+    say("Quest " .. GOLD .. name .. "|r " .. (complete and "is complete:" or "is in progress:"))
+
+    local nearest
+    for _, o in ipairs(objectives) do
+        say("  " .. objectiveText(o))
+        if o.best and (not nearest or quicker(o.best, nearest)) then nearest = o.best end
+    end
     if turnIn then
         say("  Turn in: " .. describe(turnIn, "turn in"))
     else
@@ -743,6 +761,184 @@ local function refreshPrices(automatic)
 end
 
 --------------------------------------------------------------------------------------------
+-- Levelling helper: what's next, quests near me, dungeons for my level, rares
+--------------------------------------------------------------------------------------------
+
+local function questLogEntries()
+    local out = {}
+    if C_QuestLog and C_QuestLog.GetNumQuestLogEntries and C_QuestLog.GetInfo then
+        for i = 1, (C_QuestLog.GetNumQuestLogEntries()) do
+            local info = C_QuestLog.GetInfo(i)
+            if info and not info.isHeader and info.questID and info.questID > 0 then
+                out[#out + 1] = { id = info.questID, name = info.title }
+            end
+        end
+    elseif GetNumQuestLogEntries and GetQuestLogTitle then
+        for i = 1, (GetNumQuestLogEntries()) do
+            local title, _, _, isHeader, _, _, _, questID = GetQuestLogTitle(i)
+            if not isHeader and questID and questID > 0 then out[#out + 1] = { id = questID, name = title } end
+        end
+    end
+    return out
+end
+
+--- Quest name coloured by difficulty for the player, with its level: "[12] Bounty on Murlocs"
+local function questLabel(id, name)
+    local level = QuestDB.questLevel(id)
+    local color = GOLD
+    if level and level > 0 and GetQuestDifficultyColor then
+        local c = GetQuestDifficultyColor(level)
+        if c and c.r then color = string.format("|cff%02x%02x%02x", c.r * 255, c.g * 255, c.b * 255) end
+    end
+    return color .. (level and level > 0 and ("[" .. level .. "] ") or "") .. (name or QuestDB.name(id) or ("quest " .. id)) .. "|r"
+end
+
+local function answerWhatsNext()
+    local entries = questLogEntries()
+    if #entries == 0 then
+        return say("Your quest log is empty. Try " .. GOLD .. "/ab quests here|r to find some.")
+    end
+
+    local turnIns, objectives, unknown = {}, {}, 0
+    for _, q in ipairs(entries) do
+        local name = QuestDB.name(q.id) or q.name
+        local complete, objs, turnIn = questTasks(q.id)
+        if complete then
+            if turnIn then turnIns[#turnIns + 1] = { quest = q.id, name = name, r = turnIn } else unknown = unknown + 1 end
+        else
+            for _, o in ipairs(objs) do
+                if o.best then objectives[#objectives + 1] = { quest = q.id, name = name, o = o, r = o.best } end
+            end
+        end
+    end
+    table.sort(turnIns, function(a, b) return quicker(a.r, b.r) end)
+    table.sort(objectives, function(a, b) return quicker(a.r, b.r) end)
+
+    if #turnIns > 0 then
+        say("Ready to hand in" .. (#turnIns > 4 and (" (" .. #turnIns .. ")") or "") .. ":")
+        for i = 1, math.min(4, #turnIns) do
+            local t = turnIns[i]
+            say("  " .. questLabel(t.quest, t.name) .. ": " .. describe(t.r, t.name))
+        end
+    end
+    if #objectives > 0 then
+        say("Nearest objectives:")
+        for i = 1, math.min(5, #objectives) do
+            local o = objectives[i]
+            say("  " .. questLabel(o.quest, o.name) .. ": " .. objectiveText(o.o))
+        end
+    end
+    if #turnIns == 0 and #objectives == 0 then
+        say("Questie doesn't know where any of your " .. #entries .. " quests' objectives are.")
+    end
+    if unknown > 0 then
+        say(GREY .. "  (" .. unknown .. " complete quest" .. (unknown == 1 and "" or "s") .. " with no known turn-in.)|r")
+    end
+    local first = turnIns[1] or objectives[1]
+    if first then placePin(first.r.place, first.r.spawn, first.name) end
+end
+
+local function answerQuestsHere()
+    local QuestieDBModule = QuestieLoader and QuestieLoader:ImportModule("QuestieDB")
+    local isDoable = QuestieDBModule and QuestieDBModule.IsDoable
+    local isTrivial = QuestieDBModule and QuestieDBModule.IsTrivial
+    local level = UnitLevel("player") or 1
+    local inLog = {}
+    for _, q in ipairs(questLogEntries()) do inLog[q.id] = true end
+
+    -- Group the quests you can take by the NPC or object that gives them.
+    local groups, count = {}, 0
+    for id, info in pairs(D.questInfo) do
+        local req = (info.req and info.req > 0) and info.req or info.level or 1
+        local fitsLevel = req <= level and not (info.max and info.max > 0 and level > info.max)
+        if fitsLevel and not inLog[id] then
+            local trivialOk, trivial = true, false
+            if isTrivial then trivialOk, trivial = pcall(isTrivial, info.level) end
+            local doableOk, doable = false, nil
+            if not (trivialOk and trivial) then
+                if isDoable then doableOk, doable = pcall(isDoable, id) end
+                if not doableOk then doable = questAvailable(id) end -- fallback: faction only
+            end
+            if doable then
+                local best = D.Rank(placesForIds(info.npcs, info.objects))[1]
+                if best and best.time then
+                    local key = best.place.kind .. best.place.id
+                    local g = groups[key]
+                    if not g then g = { r = best, quests = {} }; groups[key] = g end
+                    g.quests[#g.quests + 1] = id
+                    count = count + 1
+                end
+            end
+        end
+    end
+
+    local list = {}
+    for _, g in pairs(groups) do list[#list + 1] = g end
+    if #list == 0 then
+        return say("No new quests for you on this continent, as far as Questie knows.")
+    end
+    table.sort(list, function(a, b) return quicker(a.r, b.r) end)
+
+    say("Quests you can pick up (" .. count .. " on this continent), nearest first:")
+    for i = 1, math.min(5, #list) do
+        local g = list[i]
+        table.sort(g.quests, function(a, b) return (QuestDB.questLevel(a) or 0) < (QuestDB.questLevel(b) or 0) end)
+        local names = {}
+        for j, id in ipairs(g.quests) do
+            if j > 4 then names[#names + 1] = GREY .. "+" .. (#g.quests - 4) .. " more|r"; break end
+            names[#names + 1] = questLabel(id)
+        end
+        say("  " .. describe(g.r, "quests"))
+        say("      " .. table.concat(names, ", "))
+    end
+    placePin(list[1].r.place, list[1].r.spawn, "quests")
+end
+
+local function answerDungeons(level)
+    if lootUnavailable() then return end
+    level = level or UnitLevel("player") or 1
+    local fits = {}
+    for _, inst in ipairs(AskBot.Loot.instances) do
+        local range = inst.levelRange
+        if range and range[1] then
+            local lo, hi = range[1], range[#range]
+            local best = #range >= 3 and range[2] or (lo + hi) / 2
+            if level >= lo and level <= hi then fits[#fits + 1] = { inst = inst, lo = lo, hi = hi, best = best } end
+        end
+    end
+    if #fits == 0 then return say("AtlasLoot has no dungeons for level " .. level .. ".") end
+    table.sort(fits, function(a, b) return math.abs(a.best - level) < math.abs(b.best - level) end)
+
+    say("Dungeons for level " .. level .. ":")
+    local pinned
+    for i = 1, math.min(4, #fits) do
+        local f = fits[i]
+        local entrance = AskBot.Loot.EntrancePlace(f.inst)
+        local r = entrance and D.Rank({ entrance })[1]
+        local inst = f.inst
+        local loot = makeLink("loot", function() AskBot.Ask("what does " .. inst.name .. " drop") end)
+        say("  " .. GOLD .. inst.name .. "|r (" .. f.lo .. "-" .. f.hi .. ") " .. loot
+            .. (r and (" - entrance " .. whereText(r, inst.name)) or ""))
+        if r and not pinned then pinned = r end
+    end
+    if pinned then placePin(pinned.place, pinned.spawn, pinned.place.name) end
+end
+
+local function answerRares()
+    local places = {}
+    for id in pairs(D.rares) do
+        local p = D.NpcPlace(id)
+        if p and #p.spawns > 0 then places[#places + 1] = p end
+    end
+    if #places == 0 then return say("Questie doesn't list any rare mobs.") end
+    local best = showRanked(places, "Rare mobs nearest you:", "rare", 5, {
+        showLevel = true,
+        extra = function(p) return " |cffc0c0c0(" .. (D.rares[p.id] == 2 and "rare elite" or "rare") .. ")|r" end,
+    })
+    pinBest(best, "rare")
+end
+
+--------------------------------------------------------------------------------------------
 -- Understanding the question
 --------------------------------------------------------------------------------------------
 
@@ -779,7 +975,25 @@ local INTENTS = {
         "^get (.+)$", "^find (.+)$", "^item (.+)$" } },
 }
 
-local LEADING_NOISE = { "a ", "an ", "some ", "my ", "the quest ", "quest " }
+-- Levelling-helper questions, checked before the patterns above.
+local SPECIAL = {
+    { "next", {
+        "^what is next$", "^whats next$", "^what next$", "^next$", "^what now$", "^what should i do",
+        "^what do i do", "^my quests$", "^quest log$", "^questlog$", "^todo$", "^to do$", "^next steps?$" } },
+    { "questsHere", {
+        "^quests$", "^quests here$", "^quests nearby$", "^quests near me$", "^quests around", "^nearby quests$",
+        "^new quests", "^available quests", "^any quests", "^what quests", "^which quests", "^find quests",
+        "^find me quests", "^find new quests", "^quests for me" } },
+    { "dungeons", {
+        "^dungeons? for level (%d+)$", "^dungeons? at level (%d+)$", "^level (%d+) dungeons?$",
+        "^dungeons?$", "^dungeons? for me$", "^dungeons? for my level$", "^what dungeons?", "^which dungeons?",
+        "^recommend a dungeon", "^suggest a dungeon", "^any dungeons" } },
+    { "rares", {
+        "^rares?$", "^rares? here$", "^rares? nearby$", "^rares? near me$", "^rares? around", "^nearby rares$",
+        "^any rares", "^where are the rares", "^rare mobs?" } },
+}
+
+local LEADING_NOISE ={ "a ", "an ", "some ", "my ", "the quest ", "quest " }
 local TRAILING_NOISE = { " quest", " please", " from" }
 
 local function cleanSubject(s)
@@ -862,6 +1076,18 @@ local function answer(question)
         if intent == "price" then return answerPrice(nil, hits) end
         local mode = (intent == "buy" or intent == "drop") and intent or "get"
         return answerItem(nil, mode, hits)
+    end
+
+    for _, entry in ipairs(SPECIAL) do
+        for _, pattern in ipairs(entry[2]) do
+            local found, _, arg = q:find(pattern)
+            if found then
+                if entry[1] == "next" then return answerWhatsNext() end
+                if entry[1] == "questsHere" then return answerQuestsHere() end
+                if entry[1] == "dungeons" then return answerDungeons(tonumber(arg)) end
+                if entry[1] == "rares" then return answerRares() end
+            end
+        end
     end
 
     if intent == "loot" then
@@ -1025,7 +1251,8 @@ end)
 --------------------------------------------------------------------------------------------
 
 local function help()
-    say("Ask me where things are. Examples:")
+    say("Ask me where things are. Levelling: " .. GOLD .. "/ab what's next|r, " .. GOLD .. "/ab quests here|r, "
+        .. GOLD .. "/ab dungeons|r, " .. GOLD .. "/ab rares|r. Examples:")
     say("  /askbot where is my nearest skinning trainer")
     say("  /askbot nearest flight master    /askbot where's my class trainer")
     say("  /askbot who gives The Defias Brotherhood    /askbot turn in Bounty on Murlocs")

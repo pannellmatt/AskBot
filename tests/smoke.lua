@@ -102,6 +102,9 @@ local npcs = {
     [16] = { "Martie Jainrose", nil, 0, "A", { [RR] = { { 35, 55 } } } },
     [17] = { "Defias Pillager", nil, 0, nil, { [W] = { { 60, 30 } } }, 14, 15 },
     [18] = { "Defias Cutpurse", nil, 0, nil, { [W] = { { 30, 70 } } }, 9, 10 },
+    [19] = { "Leprithus", nil, 0, nil, { [W] = { { 45, 35 } } }, 19, 19, 4 },       -- rare
+    [20] = { "Foreman Grills", nil, 0, nil, { [W] = { { 30, 30 } } }, 21, 21, 2 },  -- rare elite
+    [21] = { "Far Rare", nil, 0, nil, { [DM] = { { 50, 50 } } }, 10, 10, 4 },
 }
 local quests = {
     [100] = { "The Defias Brotherhood", 1, { { 9 } }, { { 9 } }, 18, 14 },
@@ -111,7 +114,13 @@ local quests = {
         { { { 10 } }, nil, { { 2589 } } } },                                  -- kill thugs, collect linen
     [104] = { "Scout Redridge", 1, { { 9 } }, { { 16 } }, 15, 12, {},
         { "Scout the Redridge camp", { [RR] = { { 50, 50 } } } } },          -- explore objective
+    [105] = { "Patrolling Westfall", 1, { { 9 } }, { { 9 } }, 14, 10 },     -- available at Gryan
+    [106] = { "Too Easy", 1, { { 9 } }, { { 9 } }, 3, 1 },                  -- grey for a level 20
+    [107] = { "Too Hard", 1, { { 9 } }, { { 9 } }, 30, 28 },                -- level 28 needed
+    [108] = { "Already Done", 1, { { 5 } }, { { 5 } }, 15, 10 },            -- Questie says not doable
 }
+-- What Questie's IsDoable would say (completed quests, prerequisites, etc.)
+local doable = { [102] = true, [105] = true, [106] = true, [107] = true }
 -- Quest log: 100 complete, 103 half done (thugs killed), 104 in progress; 102 not taken.
 local questLog = {
     [100] = { complete = true, objectives = {} },
@@ -124,6 +133,11 @@ C_QuestLog = {
     GetLogIndexForQuestID = function(id) return questLog[id] and 1 or nil end,
     IsComplete = function(id) return questLog[id] and questLog[id].complete or false end,
     GetQuestObjectives = function(id) return questLog[id] and questLog[id].objectives end,
+    GetNumQuestLogEntries = function() return 4 end,
+    GetInfo = function(i)
+        return ({ { isHeader = true, title = "Westfall" }, { questID = 100, title = "The Defias Brotherhood" },
+            { questID = 103, title = "Red Linen Goods" }, { questID = 104, title = "Scout Redridge" } })[i]
+    end,
 }
 local items = {
     [2589] = { name = "Linen Cloth", npcDrops = { 10, 11, 17, 18 } },
@@ -146,6 +160,7 @@ NpcDB = {
     spawns = function(id) return npcs[id][5] end,
     minLevel = function(id) return npcs[id][6] end,
     maxLevel = function(id) return npcs[id][7] end,
+    rank = function(id) return npcs[id][8] or 0 end,
 }
 QuestDB = {
     GetAllIds = function() return ids(quests) end,
@@ -155,6 +170,7 @@ QuestDB = {
     finishedBy = function(id) return quests[id][4] end,
     questLevel = function(id) return quests[id][5] end,
     requiredLevel = function(id) return quests[id][6] end,
+    requiredMaxLevel = function() return 0 end,
     objectives = function(id) return quests[id][7] end,
     triggerEnd = function(id) return quests[id][8] end,
 }
@@ -176,6 +192,8 @@ LibQuestieDB = {
 }
 Questie = { started = true }
 QuestieLoader = { ImportModule = function() return {
+    IsDoable = function(id) return doable[id] == true end,
+    IsTrivial = function(level) return level ~= nil and level < 20 - 8 end,
     GetUiMapIdByAreaId = function(_, a) return areaToMap[a] end,
     GetDungeons = function() return { [1581] = { "The Deadmines", {}, W, { { W, 42.6, 71.8 } } } } end,
 } end }
@@ -196,6 +214,10 @@ local rates = { [639] = { [5193] = 23.08, [5202] = 23.19 }, [644] = { [872] = 3.
 AtlasLoot = {
     ItemDB = { Storage = { AtlasLootClassic_DungeonsAndRaids = {
         __atlaslootdata = {},
+        BlackrockDepths = {
+            name = "Blackrock Depths", MapID = 1584, LevelRange = { 48, 52, 60 },
+            items = { { name = "Emperor Dagran Thaurissan", npcID = 9019, [1] = { { 1, 11684 } } } },
+        },
         TheDeadmines = {
             name = "The Deadmines|cffffffff|TInterface\\AddOns\\AtlasLootClassic\\ltn4.tga:18:18:2:0|t|r",
             MapID = 1581, LevelRange = { 10, 17, 26 },
@@ -372,6 +394,17 @@ end
 if AskBotCharDB.chatFrame ~= 3 then failures = failures + 1; print("   !! FAIL: chat window not remembered") end
 ChatFrame3 = nil
 SlashCmdList.ASKBOT("status", { chatFrame = DEFAULT_CHAT_FRAME }) -- switch back for the rest
+
+-- Levelling helper
+ask("what's next", { "Ready to hand in:", "The Defias Brotherhood", "Gryan Stoutmantle", "Nearest objectives:",
+    "Linen Cloth|r from: ", "Scout the Redridge camp" }, { "Kill: " })
+ask("quests here", { "Quests you can pick up (2 on this continent)", "Gryan Stoutmantle", "Patrolling Westfall",
+    "Wanted Poster", "Bounty on Murlocs" }, { "Too Easy", "Too Hard", "Already Done", "Defias Brotherhood" })
+ask("what quests can i get", "Patrolling Westfall")
+ask("dungeons", { "Dungeons for level 20:", "The Deadmines|r (10-26)", "[loot]", "entrance Westfall 42.6, 71.8" },
+    { "Blackrock Depths" })
+ask("dungeons for level 55", "Blackrock Depths|r (48-60)", { "Deadmines" })
+ask("rares near me", { "Rare mobs nearest you:", "Leprithus|r lvl 19 |cffc0c0c0(rare)", "Foreman Grills", "(rare elite)" })
 
 faction = "Horde"
 ask("skinner please", "Horde Skinner", { "Helene" })

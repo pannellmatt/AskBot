@@ -18,6 +18,12 @@ Built for **World of Warcraft: Forever**.
 
 ## What you can ask
 
+### Levelling helper
+- `/ab what's next`: everything in your quest log that's ready to hand in, then the nearest unfinished objectives across all your quests.
+- `/ab quests here`: quests you can pick up, nearest first, grouped by who gives them and coloured by difficulty. AskBot uses Questie's own checks, so completed quests, missing prerequisites, quests for other classes and grey quests are all left out.
+- `/ab dungeons` (or `/ab dungeons for level 25`): dungeons that suit your level, with entrance pins and a link to their loot *(with AtlasLoot)*.
+- `/ab rares`: the nearest rare and rare-elite mobs, with their levels.
+
 ### Where's the nearest...?
 Profession and class trainers, weapon masters, pet trainers, flight masters, innkeepers, bankers, auctioneers, stable masters and repair vendors. Only NPCs friendly to your faction are shown.
 

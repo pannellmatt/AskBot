@@ -13,6 +13,8 @@ local D = {
     itemNames = {},
     itemIds = {},       -- item IDs present in itemNames
     npcNames = {},
+    questInfo = {},     -- quest id -> { level, req, max, npcs, objects } for quests with a giver
+    rares = {},         -- npc id -> rank (2 = rare elite, 4 = rare)
 }
 AskBot.Data = D
 
@@ -211,7 +213,7 @@ local YIELD_EVERY = 400
 
 function D.BuildIndex()
     local npcIds, questIds, itemIds = NpcDB.GetAllIds(), QuestDB.GetAllIds(), ItemDB.GetAllIds()
-    local total = #npcIds * 2 + #questIds + #itemIds
+    local total = #npcIds * 2 + #questIds * 2 + #itemIds
     local done = 0
     local function step()
         done = done + 1
@@ -225,6 +227,8 @@ function D.BuildIndex()
     local targets = AskBot.targets
     for i = 1, #npcIds do
         local id = npcIds[i]
+        local rank = NpcDB.rank(id)
+        if rank == 2 or rank == 4 then D.rares[id] = rank end
         local flags = NpcDB.npcFlags(id)
         local sub = NpcDB.subName(id)
         if (flags and flags > 0) or sub then
@@ -266,6 +270,20 @@ function D.BuildIndex()
     indexNames(NpcDB, npcIds, D.npcNames)
     indexNames(QuestDB, questIds, D.questNames)
     indexNames(ItemDB, itemIds, D.itemNames, D.itemIds)
+
+    -- Quest givers and level ranges, for "quests near me"
+    for i = 1, #questIds do
+        local id = questIds[i]
+        local by = QuestDB.startedBy(id)
+        local npcs, objects = by and by[1], by and by[2]
+        if (npcs and #npcs > 0) or (objects and #objects > 0) then
+            D.questInfo[id] = {
+                level = QuestDB.questLevel(id), req = QuestDB.requiredLevel(id),
+                max = QuestDB.requiredMaxLevel(id), npcs = npcs, objects = objects,
+            }
+        end
+        step()
+    end
 end
 
 --------------------------------------------------------------------------------------------
