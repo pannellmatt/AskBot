@@ -53,6 +53,7 @@ local inGroup = false
 function UnitClass(u) local d = units[u or "player"]; return d[2], d[3] end
 function UnitName(u) local d = units[u]; return d and (u == "player" or inGroup) and d[1] or nil end
 function UnitExists(u) return UnitName(u) ~= nil end
+function UnitGUID(u) return UnitExists(u) and ({ player = "Player-1-0001", party1 = "Player-1-0002" })[u] or nil end
 function IsInGroup() return inGroup end
 function IsInRaid() return false end
 function UnitLevel(u) return units[u or "player"][4] end
@@ -817,6 +818,18 @@ expectChat("party: !ask where is my party member", function()
 end, { "PARTY: [AskBot] Your group:", "Me <20 Warrior> - Westfall 50.0, 50.0", "|Hworldmap:1436:5000:5000|h",
     }, { "Buddy <", "/way" })
 advance(10)
+-- Forever shows names differently in chat ("Buddy Hunterson"): the chat event's GUID decides,
+-- and without one, a first name matches a full one.
+expectChat("party: !ask from a differently written name, with the sender's GUID", function()
+    fire("CHAT_MSG_PARTY", "!ask where is everyone", "Buddy Hunterson-Realm", "", "", "", "", 0, 0, "", 0, 1, "Player-1-0002")
+end, { "PARTY: [AskBot] Your group:", "Me <20 Warrior> - Westfall 50.0, 50.0" }, { "you're not in it", "Buddy <" })
+advance(10)
+expectChat("party: !ask from a full name without a GUID", function()
+    fire("CHAT_MSG_PARTY", "!ask where is my group", "Buddy Hunterson")
+end, { "PARTY: [AskBot] Your group:", "Me <20 Warrior>" }, { "you're not in it", "Buddy <" })
+advance(10)
+inGroup = true
+ask("debug share", { "Last !ask: Buddy Hunterson", "matched party1", "party1: Buddy (GUID Player-1-0002)" })
 expectChat("party: a question AskBot doesn't know", function()
     fire("CHAT_MSG_PARTY", "!ask what is the meaning of life", "Buddy")
 end, { "Try !ask help" }, { "/askbot help" })

@@ -61,6 +61,17 @@ function D.NameKey(s)
     return (s:match("^%s*(.-)%s*$"))
 end
 
+--- Are these the same player's name? Ignores realms ("Name-Realm") and case, and accepts a
+--- first name against a full one ("Holycell" vs "Holycell Elvendetta").
+function D.SameName(a, b)
+    if not a or not b then return false end
+    a = (a:match("^([^%-]+)") or a):lower():match("^%s*(.-)%s*$")
+    b = (b:match("^([^%-]+)") or b):lower():match("^%s*(.-)%s*$")
+    if a == b then return true end
+    local fa, fb = a:match("^(%S+)"), b:match("^(%S+)")
+    return fa ~= nil and fa == fb and (fa == a or fb == b)
+end
+
 --- Find entries by name: exact match first, else names containing the query, else names
 --- containing every word. Among partial matches, names that `accept` (optional; given an
 --- entry) approves win, then names starting with the query, then shorter names.

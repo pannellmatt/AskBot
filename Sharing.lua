@@ -55,9 +55,9 @@ local function zoneCenter(zoneName)
 end
 
 --- The asker's class, level and position: exact for group members, their zone for guild members.
-local function findAsker(sender)
+local function findAsker(sender, guid)
     local name = shortName(sender)
-    local asker = { name = name }
+    local asker = { name = name, guid = guid }
     local HBD = LibStub and LibStub("HereBeDragons-2.0", true)
 
     local units = { "player" }
@@ -67,9 +67,13 @@ local function findAsker(sender)
         for i = 1, 4 do units[#units + 1] = "party" .. i end
     end
     for _, unit in ipairs(units) do
-        if UnitExists(unit) and UnitName(unit) == name then
+        -- Match by GUID when the chat event gave one: names can differ in form (realm,
+        -- Forever's surnames) between chat and the unit API.
+        local same = UnitExists(unit) and ((guid and UnitGUID and UnitGUID(unit) == guid)
+            or (not guid and AskBot.Data.SameName(UnitName(unit), name)))
+        if same then
             local _, classFile = UnitClass(unit)
-            asker.class, asker.level = classFile, UnitLevel(unit)
+            asker.class, asker.level, asker.unit = classFile, UnitLevel(unit), unit
             local x, y, inst
             if HBD then x, y, inst = HBD:GetUnitWorldPosition(unit) end
             if x then asker.origin = { x = x, y = y, inst = inst } end
@@ -80,7 +84,7 @@ local function findAsker(sender)
     if IsInGuild and IsInGuild() and GetNumGuildMembers then
         for i = 1, GetNumGuildMembers() do
             local fullName, _, _, level, _, zone, _, _, _, _, classFile = GetGuildRosterInfo(i)
-            if fullName and shortName(fullName) == name then
+            if fullName and AskBot.Data.SameName(fullName, name) then
                 asker.class, asker.level = classFile, level
                 asker.origin = zoneCenter(zone)
                 return asker
@@ -164,7 +168,7 @@ local function fitLength(line)
     return line
 end
 
-local function replyLines(question, sender)
+local function replyLines(question, sender, guid)
     local out = {}
     if question:lower() == "help" then
         out[1] = "Ask me where things are, e.g. \"!ask nearest flight master\", \"!ask who gives <quest>\", "
@@ -172,7 +176,9 @@ local function replyLines(question, sender)
     elseif AskBot.IsPersonalQuestion(question) then
         out[1] = "That one needs your own quest log or gear. Install AskBot and use /ab for it."
     else
-        for _, line in ipairs(AskBot.AnswerFor(question, findAsker(sender))) do
+        local asker = findAsker(sender, guid)
+        AskBot.lastAsk = { sender = sender, guid = guid, unit = asker.unit, question = question }
+        for _, line in ipairs(AskBot.AnswerFor(question, asker)) do
             local text = AskBot.ToChatText(line)
             if text ~= "" then out[#out + 1] = text end
         end
@@ -192,7 +198,9 @@ end
 -- Events
 --------------------------------------------------------------------------------------------
 
-local function onChat(event, msg, sender)
+local function onChat(event, msg, sender, ...)
+    local guid = select(10, ...) -- the sender's GUID (the event's 12th value)
+    if type(guid) ~= "string" or guid == "" then guid = nil end
     local channel = CHANNELS[event]
     if not channel or not AskBot.Option(channel.option) or type(msg) ~= "string" then return end
     local question
@@ -208,7 +216,7 @@ local function onChat(event, msg, sender)
     -- Several AskBots may hear the same question: wait a moment, and skip it if another
     -- one claims it first. The asker's own AskBot answers straight away.
     local key = (name .. ":" .. question):sub(1, 200)
-    local isMe = name == UnitName("player")
+    local isMe = (guid and UnitGUID and guid == UnitGUID("player")) or (not guid and AskBot.Data.SameName(name, UnitName("player")))
     local delay = (channel.sync and not isMe) and (0.3 + math.random() * 1.2) or 0
     C_Timer.After(delay, function()
         if (claimed[key] and GetTime() - claimed[key] < CLAIM_TIME) or GetTime() - lastAnswer < GLOBAL_COOLDOWN then
@@ -220,7 +228,7 @@ local function onChat(event, msg, sender)
             pcall(C_ChatInfo.SendAddonMessage, SYNC_PREFIX, "claim:" .. key, channel.sync)
         end
         local send = (C_ChatInfo and C_ChatInfo.SendChatMessage) or SendChatMessage
-        for i, line in ipairs(replyLines(question, sender)) do
+        for i, line in ipairs(replyLines(question, sender, guid)) do
             C_Timer.After((i - 1) * 0.4, function()
                 send(line, channel.reply, nil, channel.reply == "WHISPER" and sender or nil)
             end)
@@ -237,7 +245,7 @@ end
 frame:SetScript("OnEvent", function(_, event, ...)
     if event == "CHAT_MSG_ADDON" then
         local prefix, text, _, sender = ...
-        if prefix == SYNC_PREFIX and shortName(sender) ~= UnitName("player") then
+        if prefix == SYNC_PREFIX and not AskBot.Data.SameName(sender, UnitName("player")) then
             local key = type(text) == "string" and text:match("^claim:(.+)$")
             if key then claimed[key] = GetTime() end
         end

@@ -1386,13 +1386,21 @@ end
 
 --- Where your group members are, nearest first; `only` (lower-case name) limits it to one.
 --- When answering someone's "!ask", "your group" is theirs: everyone but them, you included.
+local function isAsker(unit, name)
+    local a = AskBot.asker
+    if not a then return unit == "player" end
+    if a.unit then return unit == a.unit end
+    if a.guid and UnitGUID then return UnitGUID(unit) == a.guid end
+    return D.SameName(name, a.name)
+end
+
 local function answerGroup(only)
-    local me = AskBot.asker and AskBot.asker.name or UnitName("player")
     local units, places, notes, askerInGroup = groupUnits(), {}, {}, not AskBot.asker
     for _, unit in ipairs(units) do
         local name = UnitExists(unit) and UnitName(unit)
-        if name == me then askerInGroup = true end
-        if name and name ~= me and (not only or name:lower() == only) then
+        local asking = name and isAsker(unit, name)
+        if asking then askerInGroup = true end
+        if name and not asking and (not only or D.SameName(name, only)) then
             if UnitIsConnected and not UnitIsConnected(unit) then
                 notes[#notes + 1] = GOLD .. name .. "|r is offline."
             else
@@ -1424,7 +1432,7 @@ local function answerPerson(subject)
     local key = subject:lower()
     for _, unit in ipairs(groupUnits()) do
         local name = UnitExists(unit) and UnitName(unit)
-        if name and name:lower() == key then
+        if name and D.SameName(name, key) then
             answerGroup(key)
             return true
         end
@@ -1433,7 +1441,7 @@ local function answerPerson(subject)
         for i = 1, GetNumGuildMembers() do
             local fullName, _, _, level, className, zone, _, _, online = GetGuildRosterInfo(i)
             local name = fullName and (fullName:match("^([^%-]+)") or fullName)
-            if name and name:lower() == key then
+            if name and D.SameName(name, key) then
                 if online then
                     say(GOLD .. name .. "|r (level " .. tostring(level) .. " " .. tostring(className) .. ") is in "
                         .. tostring(zone) .. GREY .. " (from the guild roster; exact positions only for group members)|r.")
@@ -2513,6 +2521,15 @@ local function onSlash(msg, editBox)
         end
     elseif cmd:match("^share") then
         shareCommand(cmd)
+    elseif cmd == "debug share" then
+        local last = AskBot.lastAsk
+        say("Last !ask: " .. (last and (tostring(last.sender) .. " (GUID " .. tostring(last.guid) .. ") asked \""
+            .. tostring(last.question) .. "\", matched " .. tostring(last.unit or "no group member")) or "none yet"))
+        for _, unit in ipairs(groupUnits()) do
+            if UnitExists(unit) then
+                say("  " .. unit .. ": " .. tostring(UnitName(unit)) .. " (GUID " .. tostring(UnitGUID and UnitGUID(unit)) .. ")")
+            end
+        end
     elseif cmd:match("^debug item") then
         if D.status ~= "ready" then return say("Still loading, try again in a moment.") end
         debugItem(msg:sub(11))
