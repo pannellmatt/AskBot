@@ -297,6 +297,17 @@ function D.PlayerFaction()
     if f == "Alliance" then return "A" elseif f == "Horde" then return "H" end
 end
 
+--- Where a group member is right now, as a spawn; nil when unknown. The second value is
+--- the map they're on when there's no exact position (e.g. inside a dungeon).
+function D.UnitSpawn(unit)
+    local uiMapId = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit(unit)
+    local wx, wy, inst = HBD:GetUnitWorldPosition(unit)
+    if not (wx and uiMapId) then return nil, uiMapId end
+    local zx, zy = HBD:GetZoneCoordinatesFromWorld(wx, wy, uiMapId)
+    if not zx then return nil, uiMapId end
+    return { uiMapId = uiMapId, x = zx * 100, y = zy * 100, wx = wx, wy = wy, inst = inst }
+end
+
 --- Spawns for a community location from KnownLocations.lua (see the format there), for
 --- your faction. Empty when it has nothing for you.
 function D.KnownSpawns(loc)

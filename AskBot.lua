@@ -1371,6 +1371,83 @@ local function answerRares()
 end
 
 --------------------------------------------------------------------------------------------
+-- Group members: "where is my party", "where is Buddy"
+--------------------------------------------------------------------------------------------
+
+local function groupUnits()
+    local units = { "player" }
+    if IsInRaid and IsInRaid() then
+        for i = 1, 40 do units[#units + 1] = "raid" .. i end
+    elseif IsInGroup and IsInGroup() then
+        for i = 1, 4 do units[#units + 1] = "party" .. i end
+    end
+    return units
+end
+
+--- Where your group members are, nearest first; `only` (lower-case name) limits it to one.
+--- When answering someone's "!ask", "your group" is theirs: everyone but them, you included.
+local function answerGroup(only)
+    local me = AskBot.asker and AskBot.asker.name or UnitName("player")
+    local units, places, notes, askerInGroup = groupUnits(), {}, {}, not AskBot.asker
+    for _, unit in ipairs(units) do
+        local name = UnitExists(unit) and UnitName(unit)
+        if name == me then askerInGroup = true end
+        if name and name ~= me and (not only or name:lower() == only) then
+            if UnitIsConnected and not UnitIsConnected(unit) then
+                notes[#notes + 1] = GOLD .. name .. "|r is offline."
+            else
+                local spawn, mapId = D.UnitSpawn(unit)
+                local className = UnitClass(unit)
+                local sub = (UnitLevel(unit) or "?") .. " " .. (className or "")
+                if spawn then
+                    places[#places + 1] = { kind = "unit", name = name, sub = sub, spawns = { spawn } }
+                else
+                    notes[#notes + 1] = GOLD .. name .. "|r is in " .. (mapId and D.ZoneName(mapId) or "a place I can't see")
+                        .. GREY .. " (no exact position there)|r."
+                end
+            end
+        end
+    end
+    if not askerInGroup then return say("I can only see my own group, and you're not in it.") end
+    if #places == 0 and #notes == 0 then
+        return say(#units == 1 and "You're not in a group." or "No one else in your group.")
+    end
+    local results = D.Rank(places)
+    if not only and #results + #notes > 0 then say("Your group:") end
+    for _, r in ipairs(results) do say((only and "" or "  ") .. describe(r)) end
+    for _, n in ipairs(notes) do say((only and "" or "  ") .. n) end
+    if only and results[1] then autoPin(results[1].place, results[1].spawn) end
+end
+
+--- "where is <name>": a group member, else a guild member (zone only). True if answered.
+local function answerPerson(subject)
+    local key = subject:lower()
+    for _, unit in ipairs(groupUnits()) do
+        local name = UnitExists(unit) and UnitName(unit)
+        if name and name:lower() == key then
+            answerGroup(key)
+            return true
+        end
+    end
+    if IsInGuild and IsInGuild() and GetNumGuildMembers and GetGuildRosterInfo then
+        for i = 1, GetNumGuildMembers() do
+            local fullName, _, _, level, className, zone, _, _, online = GetGuildRosterInfo(i)
+            local name = fullName and (fullName:match("^([^%-]+)") or fullName)
+            if name and name:lower() == key then
+                if online then
+                    say(GOLD .. name .. "|r (level " .. tostring(level) .. " " .. tostring(className) .. ") is in "
+                        .. tostring(zone) .. GREY .. " (from the guild roster; exact positions only for group members)|r.")
+                else
+                    say(GOLD .. name .. "|r is offline.")
+                end
+                return true
+            end
+        end
+    end
+    return false
+end
+
+--------------------------------------------------------------------------------------------
 -- Gear upgrades: "/ab upgrades", "/ab upgrades legs", "I'm a feral druid, what gear..."
 --------------------------------------------------------------------------------------------
 
@@ -1942,6 +2019,10 @@ local INTENTS = {
 
 -- Levelling-helper questions, checked before the patterns above.
 local SPECIAL = {
+    { "group", {
+        "^where is my party", "^where are my party", "^where is my group", "^where are my group", "^where is my raid",
+        "^where is everyone", "^where is everybody", "^where are my friends", "^where are my mates",
+        "^find my party", "^find my group", "^where is the group", "^where is the party", "^party members?$" } },
     { "mineBest", {
         "^where can i mine$", "^where should i mine$", "^where do i mine$", "^where to mine$", "^what can i mine$",
         "^what should i mine$", "^where should i go mining$", "^where to go mining$", "^where can i go mining$",
@@ -2073,6 +2154,7 @@ local function answer(question)
         for _, pattern in ipairs(entry[2]) do
             local found, _, arg = q:find(pattern)
             if found then
+                if entry[1] == "group" then return answerGroup() end
                 if entry[1] == "mineBest" then return answerGatherBest("Mining") end
                 if entry[1] == "herbBest" then return answerGatherBest("Herbalism") end
                 if entry[1] == "next" then return answerWhatsNext() end
@@ -2092,6 +2174,11 @@ local function answer(question)
             end
         end
     end
+
+    -- "where is Buddy": a group or guild member by name
+    local person = q:match("^where is (.+)$") or q:match("^where are (.+)$") or q:match("^find (.+)$")
+        or q:match("^locate (.+)$")
+    if person and answerPerson(person) then return end
 
     if intent == "gather" or intent == "get" then
         -- "where can I mine copper", "where do I get Peacebloom": a gathering node beats the
@@ -2154,7 +2241,7 @@ local function answer(question)
     if D.FindByName(D.itemNames, subject2) then return answerItem(subject2, "get") end
     if answerLoot(subject2, true) then return end
 
-    say("Sorry, I don't know how to answer that yet. Try " .. GOLD .. "/askbot help|r.")
+    say("Sorry, I don't know how to answer that yet. Try " .. GOLD .. (AskBot.asker and "!ask help" or "/askbot help") .. "|r.")
 end
 
 --------------------------------------------------------------------------------------------
@@ -2279,6 +2366,7 @@ local function help()
     say("  /askbot what do I need before [quest]    /askbot what comes after [quest]")
     say("  /askbot where can I mine copper    /askbot Peacebloom    /askbot where should I mine")
     say("  /askbot upgrades    /askbot upgrades legs    /askbot what gear should I get as a feral druid")
+    say("  /askbot where is my party    /askbot where is <name>")
     say("Click " .. "|cff71d5ff[pin]|r" .. " on any answer to put a pin on it.")
     say("/askbot clear - remove the pin.  /askbot status - index info.  Also /ab and /ask.")
     say("/askbot refresh prices - re-check prices you've asked about (now at the AH, or on your next visit).")

@@ -89,6 +89,11 @@ Ask at the auction house and AskBot checks the live price for you. Away from it,
 ### NPCs by name
 - `/ab where is Gryan Stoutmantle`
 
+### Your group
+- `/ab where is my party` (or `where is everyone`): where each group member is, nearest first, with travel time and a pin.
+- `/ab where is Buddy`: one group member. For a guild member outside your group, the zone they're in (the game only gives addons exact positions for group members).
+- Friends can ask too: `!ask where is my party member` answers from where *they* are.
+
 You don't have to type names exactly. Lower case, missing apostrophes and partial names all work. When AskBot isn't sure what you meant, it offers clickable "Did you mean" suggestions.
 
 ---

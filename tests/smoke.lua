@@ -81,6 +81,7 @@ local maps = {
 local userWaypoint
 UiMapPoint = { CreateFromCoordinates = function(map, x, y) return { uiMapID = map, position = { x = x, y = y } } end }
 C_Map = {
+    GetBestMapForUnit = function(unit) return ({ player = 1436, party1 = 1433 })[unit] end,
     GetMapInfo = function(id) return maps[id] and { name = maps[id][1], mapType = 3 } end,
     CanSetUserWaypointOnMap = function(id) return maps[id] ~= nil end,
     SetUserWaypoint = function(p) userWaypoint = p end,
@@ -100,6 +101,10 @@ local hbd = {
         return m[2] + x * 1000, m[3] + y * 1000, m[4]
     end,
     GetPlayerWorldPosition = function() return 2500, 500, 0 end, -- middle of Westfall
+    GetZoneCoordinatesFromWorld = function(_, x, y, map)
+        local m = maps[map]
+        if m then return (x - m[2]) / 1000, (y - m[3]) / 1000 end
+    end,
     GetUnitWorldPosition = function(_, u) local d = units[u]; if d then return d[5], d[6], 0 end end,
     mapData = maps,
     GetWorldDistance = function(_, _, x1, y1, x2, y2) return math.sqrt((x1 - x2) ^ 2 + (y1 - y2) ^ 2) end,
@@ -581,7 +586,7 @@ do
     end
 end
 -- Debug: explains the zone you're in (Westfall) and the ranking
-C_Map.GetBestMapForUnit = function() return 1436 end
+C_Map.GetBestMapForUnit = function(unit) return ({ player = 1436, party1 = 1433 })[unit] end
 ask("zones debug", { "|cffffd100Westfall|r|cffaaaaaa: 14", "counted", "in your log", "too easy (grey)",
     "How these were ranked", "of yours", "away, score" }, { "The Barrens" })
 ask("quests here", "Quests you can pick up", { "Thork", "Horde Errand" })
@@ -803,7 +808,22 @@ inGroup = true
 expectChat("party: !ask closest inn", function()
     fire("CHAT_MSG_PARTY", "!ask closest inn", "Buddy")
 end, { "PARTY: [AskBot] Nearest Innkeeper:", "Innkeeper Heather", "fly Redridge Mountains > Westfall" })
+-- Group members: from your side, and from Buddy's (his group includes you)
+ask("where is my party member", { "Your group:", "Buddy|r <30 Hunter> - Redridge Mountains 35.0, 55.0" }, { "Me|r" })
+ask("where is buddy", { "Buddy|r <30 Hunter> - Redridge Mountains 35.0, 55.0" }, { "Your group:" })
+advance(10)
+expectChat("party: !ask where is my party member", function()
+    fire("CHAT_MSG_PARTY", "!ask where is my party member", "Buddy")
+end, { "PARTY: [AskBot] Your group:", "Me <20 Warrior> - Westfall 50.0, 50.0", "|Hworldmap:1436:5000:5000|h",
+    "(/way Westfall 50.0 50.0)" }, { "Buddy <" })
+advance(10)
+expectChat("party: a question AskBot doesn't know", function()
+    fire("CHAT_MSG_PARTY", "!ask what is the meaning of life", "Buddy")
+end, { "Try !ask help" }, { "/askbot help" })
+advance(10)
 inGroup = false
+ask("where is my party", "You're not in a group.")
+ask("where is guildie", { "Guildie|r (level 20 Mage) is in Stormwind City", "guild roster" })
 expectChat("whisper while whisper sharing is off", function()
     fire("CHAT_MSG_WHISPER", "!ask closest inn", "Stranger")
 end)
