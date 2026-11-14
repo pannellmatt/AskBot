@@ -218,7 +218,7 @@ local items = {
     [999] = { name = "Horde Goods", vendors = { 13 } },
     [3000] = { name = "Gryan's Medal", questRewards = { 100 } },
     [15883] = { name = "Half Pendant of Aquatic Agility" },
-    [15882] = { name = "Half Pendant of Aquatic Endurance" },
+    [15882] = { name = "Half Pendant of Aquatic Endurance", objectDrops = { 502 } },
     [15885] = { name = "Pendant of the Sea Lion", objectDrops = { 501 } },
     [4238] = { name = "Linen Bag" },
     [2570] = { name = "Linen Shirt", vendors = { 12 } },
@@ -235,6 +235,7 @@ local objects = { [500] = { "Wanted Poster", { [W] = { { 53, 52 } } } }, [501] =
     [1618] = { "Peacebloom", { [W] = { { 55, 45 } } } },
     [439558] = { "Cold Iron Deposit", { [RR] = { { 10, 90 } } } },
     [92015] = { "Summoning Circle", { [SW] = { { 25, 77 } } } },
+    [502] = { "Strange Lockbox", { [W] = { { 20, 20 } } } },    -- Questie links the wrong half to it
 }
 -- Skills: Mining 70, no Herbalism
 local skillLines = { { "Professions", true }, { "Mining", false, 70 }, { "Secondary Skills", true }, { "Fishing", false, 20 } }
@@ -545,11 +546,8 @@ faction = "Alliance"
 
 -- Quest items Questie can't place, modelled as Questie has Trial of the Sea Lion: the objective
 -- is the combined pendant (made at a shrine); the two halves are items the quest needs you to
--- bring, which Questie doesn't place. You already carry the Agility half.
--- (Questie places the real lockboxes now; these test-only community entries model the gap.)
-AskBot.KNOWN.items[15883] = { note = "Strange Lockbox (underwater)",
-    A = { { 1436, 17.9, 33.0 } }, H = { { 1421, 29.6, 29.5 } } }
-AskBot.KNOWN.items[15882] = { note = "Strange Lockbox", A = { { 1439, 48.9, 11.3 } }, H = { { 1413, 56.7, 8.3 } } }
+-- bring. Questie links the Endurance half to the wrong lockbox (object 502, Westfall); the
+-- community locations in KnownLocations.lua win. You already carry the Agility half.
 questLog[124] = { complete = false, objectives = {} }
 bags[15883] = 1
 do
@@ -558,7 +556,7 @@ do
         "|cff66cc33Got|r |cffffd100Half Pendant of Aquatic Agility",
         "Collect |cffffd100Half Pendant of Aquatic Endurance|r from: |cffffd100Strange Lockbox|r - Darkshore 48.9, 11.3",
         "(community info)", "Then make |cffffd100Pendant of the Sea Lion|r at: |cffffd100Shrine of Remulos",
-        "Do: |cffffd100Speak with the spirit" }, { "doesn't know where", "Westfall 17.9" })
+        "Do: |cffffd100Speak with the spirit" }, { "doesn't know where", "Westfall 17.9", "Westfall 20.0, 20.0" })
     -- The pin goes to the missing half, not the shrine (making the pendant comes later).
     if not (tomtomWaypoints == pins + 1 and lastPinTitle and lastPinTitle:find("Strange Lockbox", 1, true)) then
         failures = failures + 1; print("   !! FAIL: expected the pin on the missing half, got " .. tostring(lastPinTitle))

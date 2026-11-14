@@ -9,7 +9,8 @@
 --   Instead of points, `object = id` or `npc = id` borrows a Questie object's or NPC's spawns
 --   (handy for Forever's new zones, whose map IDs aren't listed here).
 --
--- AskBot.KNOWN.items[itemId]   where to get an item Questie can't place.
+-- AskBot.KNOWN.items[itemId]   where to get an item; used instead of Questie's sources (for items
+--                              Questie can't place, or places wrongly).
 -- AskBot.KNOWN.npcs[npcId]     where an NPC appears when Questie has no spawns (summoned ones).
 -- AskBot.KNOWN.quests[questId] for one quest:
 --   steps = { location, ... }  extra things to do, shown before the quest's own objectives
@@ -22,7 +23,7 @@
 local _, AskBot = ...
 
 -- uiMapIds
-local WESTFALL, REDRIDGE, WETLANDS = 1436, 1433, 1437
+local WESTFALL, REDRIDGE, WETLANDS, SILVERPINE = 1436, 1433, 1437, 1421
 local DARKSHORE, ASHENVALE, BARRENS = 1439, 1440, 1413
 local STORMWIND, UNDERCITY = 1453, 1458
 
@@ -41,7 +42,20 @@ local function binding(item, demonId, demon, circleObject)
 end
 
 AskBot.KNOWN = {
-    items = {},
+    items = {
+        -- Druid aquatic form, Trial of the Sea Lion: each half is in a Strange Lockbox. Checked
+        -- in-game. Questie links each half to the other half's lockboxes, so these win over it.
+        [15883] = { -- Half Pendant of Aquatic Agility
+            note = "Strange Lockbox (underwater)",
+            A = { { WESTFALL, 17.9, 33.0 } },    -- off the coast west of the Gold Coast Quarry, by a sunken boat
+            H = { { SILVERPINE, 29.6, 29.5 } },  -- ocean floor west of North Tide's Run
+        },
+        [15882] = { -- Half Pendant of Aquatic Endurance
+            note = "Strange Lockbox",
+            A = { { DARKSHORE, 48.9, 11.3 } },   -- at the Stone Claw, north of where the Cliffspring River meets the sea
+            H = { { BARRENS, 56.7, 8.3 } },      -- in the middle of the Sludge Fen
+        },
+    },
 
     npcs = {
         -- Druid bear form: Lunaclaw appears at the Moonkin Stone when you use the moondust.

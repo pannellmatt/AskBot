@@ -385,7 +385,7 @@ end
 local function itemSources(itemId, questId)
     local quest = questId and AskBot.KNOWN.quests[questId]
     local override = quest and quest.items and quest.items[itemId]
-    local place = override and D.KnownPlace(override, itemName(itemId))
+    local place = D.KnownPlace(override or AskBot.KNOWN.items[itemId], itemName(itemId))
     if place then return { place }, true end
 
     local drops = questPlaces(questId, ItemDB.npcDrops(itemId), ItemDB.objectDrops(itemId))
@@ -396,9 +396,6 @@ local function itemSources(itemId, questId)
         end
     end
     if #drops > 0 then return drops, anyCommunity(drops) end
-
-    place = D.KnownPlace(AskBot.KNOWN.items[itemId], itemName(itemId))
-    if place then return { place }, true end
 
     for _, p in ipairs(placesForIds(ItemDB.vendors and ItemDB.vendors(itemId), nil, true)) do
         local copy = {}
@@ -677,6 +674,8 @@ local function answerItem(query, mode, hits, others)
 
     if mode == "drop" or mode == "get" or (mode == "buy" and not anything) then
         local droppers = placesForIds(collectItem(hits, "npcDrops"), collectItem(hits, "objectDrops"))
+        -- A community location replaces Questie's drops (Questie has some wrong, e.g. the Sea Lion halves).
+        if AskBot.KNOWN.items[hits[1][2]] then droppers = {} end
         local questieNpcs = {}
         for _, p in ipairs(droppers) do if p.kind == "npc" then questieNpcs[p.id] = true end end
         local function rateFor(place)
