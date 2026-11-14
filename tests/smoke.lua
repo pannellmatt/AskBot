@@ -132,6 +132,10 @@ local npcs = {
     [23] = { "Auberdine Quester", nil, 2, "A", { [DS] = { { 37, 44 } } } },
     [24] = { "Thork", nil, 2, "H", { [BAR] = { { 51, 30 } } } },                -- Horde quest giver
     [25] = { "Chain Giver", nil, 2, "A", { [DM] = { { 40, 40 } } } },
+    [12144] = { "Lunaclaw Spirit", nil, 0, nil, {} },                           -- summoned: no spawns
+    [641] = { "Goblin Woodcarver", nil, 0, nil, { [1581] = { { -1, -1 } } }, 18, 19 }, -- inside the Deadmines
+    [5676] = { "Summoned Voidwalker", nil, 0, nil, {} },
+    [376] = { "High Priestess Laurena", "Priest Trainer", 16, "A", { [SW] = { { 49.5, 44.6 } } } },
 }
 local quests = {
     [100] = { "The Defias Brotherhood", 1, { { 9 } }, { { 9 } }, 18, 14 },
@@ -167,6 +171,13 @@ local quests = {
     [135] = { "Done Earlier", 1, { { 25 } }, { { 25 } }, 12, 10 },
     [136] = { "After Done", 1, { { 25 } }, { { 25 } }, 13, 10 },
     [137] = { "Lead-in", 1, { { 25 } }, { { 25 } }, 12, 10 },
+    -- Class quests with community locations (real IDs, so KnownLocations.lua applies)
+    [6001] = { "Body and Heart", 1, { { 9 } }, { { 9 } }, 10, 10, { { { 12144, "Lunaclaw Spirit" } } } },
+    [1786] = { "The Tome of Divinity", 1, { { 9 } }, { { 16 } }, 13, 12, { { { 16 } } }, nil, nil, { 6866 } },
+    [1789] = { "The Symbol of Life", 1, { { 6 } }, { { 6 } }, 12, 12 },
+    [1689] = { "The Binding", 1, { { 6 } }, { { 6 } }, 10, 10, { { { 5676 } } } },
+    [94778] = { "Divine Grace", 1, {}, {}, 10, 10 },
+    [141] = { "Thread Run", 1, { { 9 } }, { { 9 } }, 12, 10, { nil, nil, { { 2320 } } } },
     [124] = { "Trial of the Sea Lion", 1, { { 9 } }, { { 9 } }, 16, 16,          -- items Questie cannot place
         { nil, nil, { { 15885 } } }, nil,                                  -- objective: the combined pendant
         { { { [W] = { { 30, 30 } } }, 0, "Speak with the spirit" } }, { 15882, 15883 } },  -- halves to bring
@@ -212,6 +223,8 @@ local items = {
     [4238] = { name = "Linen Bag" },
     [2570] = { name = "Linen Shirt", vendors = { 12 } },
     [2996] = { name = "Bolt of Linen Cloth" },
+    [6866] = { name = "Symbol of Life", questRewards = { 1789 } },
+    [6994] = { name = "Whitestone Oak Lumber", npcDrops = { 641 } },
 }
 local objects = { [500] = { "Wanted Poster", { [W] = { { 53, 52 } } } }, [501] = { "Shrine of Remulos", { [W] = { { 20, 80 } } } },
     -- Gathering: copper in Westfall (2 points; 2055 repeats one) and Dun Morogh (3)
@@ -221,6 +234,7 @@ local objects = { [500] = { "Wanted Poster", { [W] = { { 53, 52 } } } }, [501] =
     [1733] = { "Silver Vein", { [RR] = { { 60, 60 } } } },
     [1618] = { "Peacebloom", { [W] = { { 55, 45 } } } },
     [439558] = { "Cold Iron Deposit", { [RR] = { { 10, 90 } } } },
+    [92015] = { "Summoning Circle", { [SW] = { { 25, 77 } } } },
 }
 -- Skills: Mining 70, no Herbalism
 local skillLines = { { "Professions", true }, { "Mining", false, 70 }, { "Secondary Skills", true }, { "Fishing", false, 20 } }
@@ -508,7 +522,7 @@ do
 end
 -- Debug: explains the zone you're in (Westfall) and the ranking
 C_Map.GetBestMapForUnit = function() return 1436 end
-ask("zones debug", { "|cffffd100Westfall|r|cffaaaaaa: 11", "counted", "in your log", "too easy (grey)",
+ask("zones debug", { "|cffffd100Westfall|r|cffaaaaaa: 14", "counted", "in your log", "too easy (grey)",
     "How these were ranked", "of yours", "away, score" }, { "The Barrens" })
 ask("quests here", "Quests you can pick up", { "Thork", "Horde Errand" })
 ask("zones for level 14", { "Where to quest at level 14:", "Westfall|r: 2 yours + 4 new" },
@@ -532,6 +546,10 @@ faction = "Alliance"
 -- Quest items Questie can't place, modelled as Questie has Trial of the Sea Lion: the objective
 -- is the combined pendant (made at a shrine); the two halves are items the quest needs you to
 -- bring, which Questie doesn't place. You already carry the Agility half.
+-- (Questie places the real lockboxes now; these test-only community entries model the gap.)
+AskBot.KNOWN.items[15883] = { note = "Strange Lockbox (underwater)",
+    A = { { 1436, 17.9, 33.0 } }, H = { { 1421, 29.6, 29.5 } } }
+AskBot.KNOWN.items[15882] = { note = "Strange Lockbox", A = { { 1439, 48.9, 11.3 } }, H = { { 1413, 56.7, 8.3 } } }
 questLog[124] = { complete = false, objectives = {} }
 bags[15883] = 1
 do
@@ -559,6 +577,34 @@ questLog[124] = nil
 -- Asking about a half directly also uses the community location
 ask("where can i get half pendant of aquatic endurance", { "Half Pendant of Aquatic Endurance|r is found in:",
     "Darkshore 48.9, 11.3", "(community info)" })
+
+-- Class quests: a community step and a summoned NPC (Body and Heart), per faction
+questLog[6001] = { complete = false, objectives = {} }
+ask("[[10] Body and Heart (6001)]", { "Do: |cffffd100Use the Cenarion Moondust at the Moonkin Stone|r - Darkshore 43.5, 46.0",
+    "Kill: |cffffd100Lunaclaw (use the moondust at the Moonkin Stone)|r - Darkshore 43.5, 46.0", "(community info)" },
+    { "doesn't know where", "Barrens" })
+questLog[6001] = nil
+-- An item an earlier quest rewarded: who gives it (Symbol of Life)
+questLog[1786] = { complete = false, objectives = {} }
+ask("[[13] The Tome of Divinity (1786)]", { "Collect |cffffd100Symbol of Life|r from: |cffffd100Ander Germaine",
+    "(reward for The Symbol of Life)" }, { "doesn't know where" })
+bags[6866] = 1
+ask("[[13] The Tome of Divinity (1786)]", { "|cff66cc33Got|r |cffffd100Symbol of Life" })
+bags[6866] = nil
+questLog[1786] = nil
+-- Mobs inside dungeons point at the entrance
+ask("where does whitestone oak lumber drop", { "Goblin Woodcarver", "in The Deadmines, entrance Westfall 42.6, 71.8" })
+-- Warlock demon: summon it at the city's summoning circle (a Questie object borrowed for the quest)
+questLog[1689] = { complete = false, objectives = {} }
+ask("[[10] The Binding (1689)]", { "Do: |cffffd100Use the Bloodstone Choker at the summoning circle|r - Stormwind City 25.0, 77.0",
+    "Kill: |cffffd100Summoned Voidwalker (at the summoning circle)|r - Stormwind City 25.0, 77.0" }, { "doesn't know where" })
+questLog[1689] = nil
+-- A turn-in Questie doesn't list
+ask("turn in divine grace", { "Divine Grace", "High Priestess Laurena", "Stormwind City 49.5, 44.6" }, { "doesn't know where" })
+-- A quest item sold by a vendor
+questLog[141] = { complete = false, objectives = {} }
+ask("[[12] Thread Run (141)]", { "Collect |cffffd100Coarse Thread|r from: |cffffd100Thread Seller", "(sells it)" })
+questLog[141] = nil
 
 -- Quest chains (Questie would say Part 1, Side Errand, After Done and Lead-in can be taken now)
 for _, id in ipairs({ 130, 133, 136, 137 }) do doable[id] = true end

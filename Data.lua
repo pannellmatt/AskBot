@@ -15,6 +15,7 @@ local D = {
     npcNames = {},
     questInfo = {},     -- quest id -> { level, req, max, npcs, objects } for quests with a giver
     unlocks = {},       -- quest id -> quests that list it as a prerequisite
+    givenBy = {},       -- item id -> quests that hand it to you when you take them
     rares = {},         -- npc id -> rank (2 = rare elite, 4 = rare)
     gather = {},        -- node name -> { name, prof, skill, special, items, ids }
     gatherKeys = {},    -- name key (node or item) -> { display, nodes = { node names } }
@@ -143,19 +144,62 @@ function D.ZoneName(uiMapId)
     return info and info.name or ("map " .. uiMapId)
 end
 
+-- Dungeons by area ID (main and alternative IDs), from Questie's dungeon table.
+local dungeonByArea
+local function dungeonFor(areaId)
+    if not dungeonByArea then
+        dungeonByArea = {}
+        local ok, list = pcall(function() return ZoneDB:GetDungeons() end)
+        if ok and type(list) == "table" then
+            for id, d in pairs(list) do
+                local entry = { name = d[1], entrances = d[4] }
+                dungeonByArea[id] = entry
+                for _, alt in ipairs(type(d[2]) == "table" and d[2] or {}) do
+                    dungeonByArea[alt] = dungeonByArea[alt] or entry
+                end
+            end
+        end
+    end
+    return dungeonByArea[areaId]
+end
+
+--- Spawns at a dungeon's entrance(s), each marked with the dungeon's name; nil if the area
+--- isn't a dungeon Questie knows the entrance of.
+function D.DungeonEntranceSpawns(areaId)
+    local d = dungeonFor(areaId)
+    if not d then return nil end
+    if not d.spawns then
+        d.spawns = {}
+        for _, e in ipairs(type(d.entrances) == "table" and d.entrances or {}) do
+            local uiMapId = uiMapFor(e[1])
+            if uiMapId then
+                local wx, wy, inst = HBD:GetWorldCoordinatesFromZone(e[2] / 100, e[3] / 100, uiMapId)
+                d.spawns[#d.spawns + 1] = { uiMapId = uiMapId, x = e[2], y = e[3], wx = wx, wy = wy, inst = inst, dungeon = d.name }
+            end
+        end
+    end
+    return #d.spawns > 0 and d.spawns or nil
+end
+
 function D.ResolveSpawns(spawnList)
     local out = {}
     if type(spawnList) ~= "table" then return out end
     for areaId, coords in pairs(spawnList) do
         local uiMapId = uiMapFor(areaId)
-        if uiMapId and type(coords) == "table" then
+        local inside = not uiMapId
+        if type(coords) == "table" then
             for _, c in ipairs(coords) do
                 local x, y = c[1], c[2]
-                if x and y and x >= 0 and y >= 0 then
+                if uiMapId and x and y and x >= 0 and y >= 0 then
                     local wx, wy, inst = HBD:GetWorldCoordinatesFromZone(x / 100, y / 100, uiMapId)
                     out[#out + 1] = { uiMapId = uiMapId, x = x, y = y, wx = wx, wy = wy, inst = inst }
+                else
+                    inside = true -- Questie writes -1, -1 for spawns inside dungeons
                 end
             end
+        end
+        if inside then
+            for _, s in ipairs(D.DungeonEntranceSpawns(areaId) or {}) do out[#out + 1] = s end
         end
     end
     return out
@@ -249,6 +293,24 @@ end
 function D.PlayerFaction()
     local f = UnitFactionGroup("player")
     if f == "Alliance" then return "A" elseif f == "Horde" then return "H" end
+end
+
+--- Spawns for a community location from KnownLocations.lua (see the format there), for
+--- your faction. Empty when it has nothing for you.
+function D.KnownSpawns(loc)
+    if not loc then return {} end
+    if loc.object then local p = D.ObjectPlace(loc.object); return p and p.spawns or {} end
+    if loc.npc then local p = D.NpcPlace(loc.npc); return p and p.spawns or {} end
+    if loc.dungeon then return D.DungeonEntranceSpawns(loc.dungeon) or {} end
+    return D.SpawnsFromMapPoints(loc[D.PlayerFaction() or ""] or loc.N)
+end
+
+--- A place for a community location, named by its note (or `name`); nil when it has nothing
+--- for you.
+function D.KnownPlace(loc, name)
+    local spawns = D.KnownSpawns(loc)
+    if #spawns == 0 then return nil end
+    return { kind = "known", name = loc.note or name or "?", spawns = spawns }
 end
 
 function D.IsFriendly(place, mine)
@@ -350,6 +412,13 @@ function D.BuildIndex()
                 level = QuestDB.questLevel(id), req = QuestDB.requiredLevel(id),
                 max = QuestDB.requiredMaxLevel(id), npcs = npcs, objects = objects,
             }
+        end
+        -- Items a quest hands you when you take it, for "where do I get another one?"
+        local given = QuestDB.sourceItemId and QuestDB.sourceItemId(id)
+        if type(given) == "number" and given > 0 then
+            local list = D.givenBy[given]
+            if not list then list = {}; D.givenBy[given] = list end
+            list[#list + 1] = id
         end
         -- Reverse the prerequisite links, for "what comes after X?"
         for _, field in ipairs({ "preQuestSingle", "preQuestGroup" }) do

@@ -39,6 +39,7 @@ Shift-click a quest into the command, or type its name.
 
 - **A quest in your log:** the nearest place for each objective you haven't finished, then where to hand it in.
 - **A quest you don't have:** who gives it, with its level.
+- **Gaps in Questie's data are filled in:** mobs inside dungeons point to the entrance, quest items you've lost point to whoever hands them out, and class quests get community locations where Questie has none, e.g. the Moonkin Stone for the druid bear form, the warlock summoning circles, and Forever's new shaman Call of Water spots. These are marked *(community info)*.
 
 **Quest chains:** when a quest you expect isn't showing up, it's usually waiting on an earlier one.
 - `/ab what do I need before [quest]` (or `how do I unlock`, `why can't I get`, `[quest] prereqs`) lists the earlier quests you haven't done, in order, with where to pick up the first one. It also mentions optional lead-in quests.
