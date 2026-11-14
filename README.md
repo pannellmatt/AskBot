@@ -124,7 +124,7 @@ Thor <Gryphon Master> - Westfall 56.6, 52.6 (71 yds, <1 min)
 ```
 
 - **Where they are:** answers are worked out from the asker's position (exact for group members, their zone for guild members) and their class, so "my class trainer" means *their* class.
-- **Pins for them too:** each answer carries the game's own `[Map Pin Location]` link, which anyone can click to put the spot on their map, no addon needed. It also has a `/way Zone x y` command for TomTom users.
+- **Pins for them too:** each answer carries the game's own `[Map Pin Location]` link, which anyone can click to put the spot on their map, no addon needed.
 - **No spam:** it's off by default, answers are at most four lines, and there's a cooldown per person.
 - **Several AskBots:** when more than one guild member runs AskBot, only one of them answers.
 - **Quest log questions:** "what's next" and "quests here" need the asker's own quest log, so they only work with `/ab`.

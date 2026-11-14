@@ -761,7 +761,7 @@ end)
 ask("share guild on", "guild |cff66cc33on|r")
 
 -- A guild member in Stormwind: answered from the middle of their zone, as plain chat
--- Pins become the game's map pin links (clickable without AskBot) plus a TomTom /way command;
+-- Pins become the game's map pin links (clickable without AskBot);
 -- your own map pin is put back afterwards.
 local pinsBefore = tomtomWaypoints
 local myWaypoint = UiMapPoint.CreateFromCoordinates(1436, 0.5, 0.5)
@@ -769,8 +769,8 @@ userWaypoint = myWaypoint
 expectChat("guild: !ask nearest skinning trainer", function()
     fire("CHAT_MSG_GUILD", "!ask nearest skinning trainer", "Guildie-Realm")
 end, { "GUILD: [AskBot] Nearest Skinning trainer:", "Helene Peltskinner <Skinning Trainer> - Stormwind City 71.6, 62.8 (",
-    "|cffffff00|Hworldmap:1453:7160:6280|h[Map Pin Location]|h|r", "(/way Stormwind City 71.6 62.8)" },
-    { "|Haddon", "[pin]", "AskBot:" })
+    "|cffffff00|Hworldmap:1453:7160:6280|h[Map Pin Location]|h|r" },
+    { "|Haddon", "[pin]", "AskBot:", "/way" })
 if tomtomWaypoints ~= pinsBefore then failures = failures + 1; print("   !! FAIL: answering someone else placed a pin") end
 if userWaypoint ~= myWaypoint then failures = failures + 1; print("   !! FAIL: your own map pin wasn't put back") end
 userWaypoint = nil
@@ -815,7 +815,7 @@ advance(10)
 expectChat("party: !ask where is my party member", function()
     fire("CHAT_MSG_PARTY", "!ask where is my party member", "Buddy")
 end, { "PARTY: [AskBot] Your group:", "Me <20 Warrior> - Westfall 50.0, 50.0", "|Hworldmap:1436:5000:5000|h",
-    "(/way Westfall 50.0 50.0)" }, { "Buddy <" })
+    }, { "Buddy <", "/way" })
 advance(10)
 expectChat("party: a question AskBot doesn't know", function()
     fire("CHAT_MSG_PARTY", "!ask what is the meaning of life", "Buddy")

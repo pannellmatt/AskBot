@@ -124,13 +124,8 @@ local function mapPinLink(uiMapId, x, y)
     return link
 end
 
-local function zoneName(uiMapId)
-    local info = C_Map and C_Map.GetMapInfo and C_Map.GetMapInfo(uiMapId)
-    return info and info.name
-end
-
 --- Strip colours, textures and AskBot's own links, keeping real item links. Pins become the
---- game's map pin links, and the line's first pin also gets a TomTom "/way" command.
+--- game's map pin links.
 function AskBot.ToChatText(line)
     local keep = {}
     local function hold(link)
@@ -138,11 +133,8 @@ function AskBot.ToChatText(line)
         return "\001" .. #keep .. "\002"
     end
     line = line:gsub("|c%x%x%x%x%x%x%x%x|Hitem:.-|h.-|h|r", hold)
-    local way
     line = line:gsub("\003(%d+):([%d%.]+):([%d%.]+)\004", function(map, x, y)
-        map = tonumber(map)
-        if not way and zoneName(map) then way = "/way " .. zoneName(map) .. " " .. x .. " " .. y end
-        local link = mapPinLink(map, tonumber(x), tonumber(y))
+        local link = mapPinLink(tonumber(map), tonumber(x), tonumber(y))
         return link and hold(link) or ""
     end)
     line = line:gsub("|Haddon:askbot:%d+|h%[(.-)%]|h", function(text)
@@ -151,7 +143,6 @@ function AskBot.ToChatText(line)
     end)
     line = line:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|T.-|t", ""):gsub("|H.-|h(.-)|h", "%1")
     line = line:gsub("\001(%d+)\002", function(n) return keep[tonumber(n)] end)
-    if way then line = line .. " (" .. way .. ")" end
     line = line:gsub("%s+", " "):gsub("%s+([,%.%)])", "%1")
     return (line:match("^%s*(.-)%s*$"))
 end
@@ -161,7 +152,7 @@ local WORLDMAP_LINK = "|c%x%x%x%x%x%x%x%x|Hworldmap:.-|h.-|h|r"
 local function fitLength(line)
     if #line <= MAX_LENGTH then return line end
     -- Too long: links can't be cut in half. Drop map pin links from the last one back (the
-    -- /way text stays), then item link codes, then shorten.
+    -- coordinates in the text stay), then item link codes, then shorten.
     while #line > MAX_LENGTH do
         local last
         for s, e in line:gmatch("()" .. WORLDMAP_LINK .. "()") do last = { s, e } end
