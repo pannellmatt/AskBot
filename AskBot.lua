@@ -903,7 +903,7 @@ local function answerQuestsHere(ids, maxGivers)
     local groups, count = {}, 0
     for _, id in ipairs(ids) do
         local info = D.questInfo[id]
-        local best = D.Rank(placesForIds(info.npcs, info.objects))[1]
+        local best = D.Rank(placesForIds(info.npcs, info.objects, true))[1]
         if best and best.dist then -- same continent only
             local key = best.place.kind .. best.place.id
             local g = groups[key]
@@ -937,7 +937,14 @@ end
 
 --- Zones worth questing in: those with the most quests you can take near your level,
 --- each with its busiest quest giver as the hub to head for.
-local function answerZones(level, ids, maxZones)
+-- Capital cities: their quests are mostly class, profession and chain quests, so they're
+-- not suggested as places to level.
+local CAPITALS = { [1453] = true, [1455] = true, [1457] = true, [1454] = true, [1456] = true, [1458] = true }
+
+--- Zones worth questing in: the most quests you can take near your level, weighed by how
+--- far away the zone is, each with its busiest quest giver as the place to start.
+--- With `debug`, also prints the numbers behind the ranking.
+local function answerZones(level, ids, maxZones, debug)
     level = level or askerLevel()
     ids = ids or doableQuests(level)
     maxZones = maxZones or 3
@@ -945,14 +952,15 @@ local function answerZones(level, ids, maxZones)
     local zones = {}
     for _, id in ipairs(ids) do
         local info = D.questInfo[id]
-        local giver = placesForIds(info.npcs, info.objects)[1]
+        local giver = placesForIds(info.npcs, info.objects, true)[1]
         local spawn = giver and giver.spawns[1]
-        if spawn then
+        if spawn and not CAPITALS[spawn.uiMapId] then
             local z = zones[spawn.uiMapId]
-            if not z then z = { map = spawn.uiMapId, levels = {}, givers = {}, fit = 0 }; zones[spawn.uiMapId] = z end
+            if not z then z = { map = spawn.uiMapId, quests = {}, levels = {}, givers = {}, fit = 0 }; zones[spawn.uiMapId] = z end
             local ql = info.level or 0
+            z.quests[#z.quests + 1] = id
             z.levels[#z.levels + 1] = ql
-            if ql >= level - 2 and ql <= level + 3 then z.fit = z.fit + 1 end
+            if ql >= level - 3 and ql <= level + 4 then z.fit = z.fit + 1 end
             local key = giver.kind .. giver.id
             local g = z.givers[key]
             if not g then g = { place = giver, n = 0 }; z.givers[key] = g end
@@ -960,16 +968,28 @@ local function answerZones(level, ids, maxZones)
         end
     end
 
+    -- Score by quests (those near your level count double), then weigh the best few by
+    -- travel time to their hub: 5 minutes away halves a zone's score.
     local list = {}
     for _, z in pairs(zones) do
         if #z.levels >= 3 then
-            z.score = z.fit * 2 + #z.levels
+            z.questScore = z.fit * 2 + #z.levels
+            for _, g in pairs(z.givers) do
+                if not z.hub or g.n > z.hub.n then z.hub = g end
+            end
             list[#list + 1] = z
         end
     end
     if #list == 0 then
         say("Questie doesn't know of a zone with several quests for level " .. level .. " that you haven't done.")
         return nil
+    end
+    table.sort(list, function(a, b) return a.questScore > b.questScore end)
+    for i = #list, 13, -1 do list[i] = nil end -- only the best dozen are worth timing
+    for _, z in ipairs(list) do
+        z.r = D.Rank({ z.hub.place })[1]
+        local minutes = (z.r and z.r.time or 1800) / 60
+        z.score = z.questScore / (1 + minutes / 5)
     end
     table.sort(list, function(a, b) return a.score > b.score end)
 
@@ -980,17 +1000,25 @@ local function answerZones(level, ids, maxZones)
         table.sort(z.levels)
         local lo = z.levels[math.floor(#z.levels * 0.15) + 1]
         local hi = z.levels[math.max(1, math.ceil(#z.levels * 0.85))]
-        local hub
-        for _, g in pairs(z.givers) do
-            if not hub or g.n > hub.n then hub = g end
-        end
         local zoneName = D.ZoneName(z.map)
         say("  " .. GOLD .. zoneName .. "|r: " .. #z.levels .. " quests for you"
             .. (lo > 0 and (" (mostly level " .. lo .. (hi > lo and ("-" .. hi) or "") .. ")") or ""))
-        local r = D.Rank({ hub.place })[1]
-        if r then
-            say("      start at " .. describe(r, zoneName) .. GREY .. " - " .. hub.n .. " quest" .. (hub.n == 1 and "" or "s") .. "|r")
-            firstHub = firstHub or r
+        if z.r then
+            say("      start at " .. describe(z.r, zoneName) .. GREY .. " - " .. z.hub.n .. " quest" .. (z.hub.n == 1 and "" or "s") .. "|r")
+            firstHub = firstHub or z.r
+        end
+    end
+
+    if debug then
+        say(GREY .. "How these were ranked (quests near your level count double; 5 min of travel halves the score):|r")
+        for i = 1, math.min(8, #list) do
+            local z = list[i]
+            local names = {}
+            table.sort(z.quests, function(a, b) return (QuestDB.questLevel(a) or 0) < (QuestDB.questLevel(b) or 0) end)
+            for j = 1, math.min(4, #z.quests) do names[j] = questLabel(z.quests[j]) end
+            say(string.format("  %s: %d quests, %d near your level, %s away, score %.1f", D.ZoneName(z.map), #z.levels, z.fit,
+                z.r and z.r.time and formatTime(z.r.time) or "unknown", z.score))
+            say("      " .. table.concat(names, ", ") .. (#z.quests > 4 and (GREY .. " ...|r") or ""))
         end
     end
     return firstHub
@@ -1093,7 +1121,7 @@ local SPECIAL = {
         "^what should i quest", "^where should i go next", "^where should i go now", "^where next$", "^where now$",
         "^where to go next", "^where do i go next", "^quest next$", "^questing next$" } },
     { "zones", {
-        "^zones? for level (%d+)$", "^level (%d+) zones?$", "^where should i level at (%d+)$", "^where to level at (%d+)$",
+        "^zones? debug$", "^zones? for level (%d+)$", "^level (%d+) zones?$", "^where should i level at (%d+)$", "^where to level at (%d+)$",
         "^where should i level", "^where to level", "^where do i level", "^where can i level", "^where should i go$",
         "^zones?$", "^zones? for me$", "^zones? for my level$", "^what zones?", "^which zones?", "^best zones?",
         "^levell?ing zones?", "^where to go$" } },
@@ -1210,7 +1238,7 @@ local function answer(question)
                     return
                 end
                 if entry[1] == "zones" then
-                    local r = answerZones(tonumber(arg))
+                    local r = answerZones(tonumber(arg), nil, nil, q:find("debug") ~= nil)
                     if r then autoPin(r.place, r.spawn, "quests") end
                     return
                 end

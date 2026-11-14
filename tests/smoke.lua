@@ -75,6 +75,7 @@ local maps = {
     [1454] = { "Orgrimmar", 0, 0, 1 },
     [1434] = { "Stranglethorn Vale", 2000, 2000, 0 }, [1411] = { "Durotar", 1000, 0, 1 },
     [1439] = { "Darkshore", 3000, 0, 1 }, [1438] = { "Teldrassil", 3000, -2000, 1 },
+    [1413] = { "The Barrens", 3000, 2000, 1 },
 }
 C_Map = { GetMapInfo = function(id) return maps[id] and { name = maps[id][1], mapType = 3 } end }
 local hbd = {
@@ -102,8 +103,8 @@ TomTom = {
 
 -- QuestieDB data -------------------------------------------------------------------------
 local W, SW, DM, RR, OG = 40, 1519, 1, 44, 1637 -- area ids
-local TD = 141
-local areaToMap = { [SW] = 1453, [W] = 1436, [DM] = 1426, [RR] = 1433, [OG] = 1454, [TD] = 1438 }
+local TD, DS, BAR = 141, 148, 17
+local areaToMap = { [SW] = 1453, [W] = 1436, [DM] = 1426, [RR] = 1433, [OG] = 1454, [TD] = 1438, [DS] = 1439, [BAR] = 1413 }
 local npcs = {
     [1] = { "Helene Peltskinner", "Skinning Trainer", 16, "A", { [SW] = { { 71.6, 62.8 } } } },
     [2] = { "Far Skinner", "Skinning Trainer", 16, "A", { [DM] = { { 50, 50 } } } },
@@ -127,6 +128,8 @@ local npcs = {
     [20] = { "Foreman Grills", nil, 0, nil, { [W] = { { 30, 30 } } }, 21, 21, 2 },  -- rare elite
     [21] = { "Far Rare", nil, 0, nil, { [DM] = { { 50, 50 } } }, 10, 10, 4 },
     [22] = { "Jannok Breezesong", nil, 0, "A", { [TD] = { { 56, 60 } } } },
+    [23] = { "Auberdine Quester", nil, 2, "A", { [DS] = { { 37, 44 } } } },
+    [24] = { "Thork", nil, 2, "H", { [BAR] = { { 51, 30 } } } },                -- Horde quest giver
 }
 local quests = {
     [100] = { "The Defias Brotherhood", 1, { { 9 } }, { { 9 } }, 18, 14 },
@@ -145,10 +148,20 @@ local quests = {
     [111] = { "Redridge Goulash", 1, { { 16 } }, { { 16 } }, 18, 15 },
     [112] = { "Blackrock Menace", 1, { { 16 } }, { { 16 } }, 19, 16 },
     [113] = { "Shadowhide Gnolls", 1, { { 16 } }, { { 16 } }, 22, 18 },
+    [114] = { "Horde Errand 1", 0, { { 24 } }, { { 24 } }, 19, 15 },   -- no race rule, but the giver is Horde
+    [115] = { "Horde Errand 2", 0, { { 24 } }, { { 24 } }, 19, 15 },
+    [116] = { "Horde Errand 3", 0, { { 24 } }, { { 24 } }, 20, 15 },
+    [117] = { "City Errand 1", 1, { { 6 } }, { { 6 } }, 19, 15 },      -- given in Stormwind
+    [118] = { "City Errand 2", 1, { { 6 } }, { { 6 } }, 19, 15 },
+    [119] = { "City Errand 3", 1, { { 6 } }, { { 6 } }, 20, 15 },
+    [120] = { "Darkshore Task 1", 1, { { 23 } }, { { 23 } }, 19, 15 }, -- across the sea
+    [121] = { "Darkshore Task 2", 1, { { 23 } }, { { 23 } }, 20, 15 },
+    [122] = { "Darkshore Task 3", 1, { { 23 } }, { { 23 } }, 21, 15 },
 }
 -- What Questie's IsDoable would say (completed quests, prerequisites, etc.)
 local doable = { [102] = true, [105] = true, [106] = true, [107] = true, [109] = true, [110] = true,
-    [111] = true, [112] = true, [113] = true }
+    [111] = true, [112] = true, [113] = true, [114] = true, [115] = true, [116] = true,
+    [117] = true, [118] = true, [119] = true, [120] = true, [121] = true, [122] = true }
 -- Quest log: 100 complete, 103 half done (thugs killed), 104 in progress; 102 not taken.
 local questLog = {
     [100] = { complete = true, objectives = {} },
@@ -429,19 +442,24 @@ SlashCmdList.ASKBOT("status", { chatFrame = DEFAULT_CHAT_FRAME }) -- switch back
 -- Levelling helper
 ask("what's next", { "Ready to hand in:", "The Defias Brotherhood", "Gryan Stoutmantle", "Nearest objectives:",
     "Linen Cloth|r from: ", "Scout the Redridge camp" }, { "Kill: " })
-ask("quests here", { "Quests you can pick up (7 on this continent)", "Gryan Stoutmantle", "Patrolling Westfall",
+ask("quests here", { "Quests you can pick up (10 on this continent)", "Gryan Stoutmantle", "Patrolling Westfall",
     "Wanted Poster", "Bounty on Murlocs" }, { "Too Easy", "Too Hard", "Already Done", "Defias Brotherhood" })
 ask("what quests can i get", "Patrolling Westfall")
--- Zones: at level 20 Redridge (quests 18-22) beats Westfall (quests 12-16)
+-- Zones: at level 20 Redridge (quests 18-22) beats Westfall (quests 12-16) and Darkshore (as
+-- good, but across the sea). Horde givers' quests and capital cities are never suggested.
 do
     local from = #output + 1
     ask("where should i level", { "Best zones to quest in at level 20:", "Redridge Mountains|r: 3 quests for you (mostly level 18-22)",
-        "start at |cffffd100Martie Jainrose", "Westfall|r: 4 quests for you" })
+        "start at |cffffd100Martie Jainrose", "Westfall|r: 4 quests for you", "Darkshore|r: 3 quests" },
+        { "The Barrens", "Stormwind City|r:", "Horde Errand" })
     local text = table.concat(output, "\n", from)
-    if (text:find("Redridge Mountains|r:", 1, true) or 0) > (text:find("Westfall|r:", 1, true) or 0) then
-        failures = failures + 1; print("   !! FAIL: Redridge should rank above Westfall at level 20")
+    local function pos(s) return text:find(s, 1, true) or math.huge end
+    if not (pos("Redridge Mountains|r:") < pos("Darkshore|r:")) then
+        failures = failures + 1; print("   !! FAIL: Redridge should rank above Darkshore at level 20")
     end
 end
+ask("zones debug", { "How these were ranked", "near your level", "away, score" }, { "The Barrens" })
+ask("quests here", "Quests you can pick up", { "Thork", "Horde Errand" })
 ask("zones for level 14", { "Best zones to quest in at level 14:", "Westfall|r: 4 quests for you" }, { "Redridge", "Too Easy" })
 ask("where should i quest next?", { "Best zones to quest in at level 20:", "Redridge Mountains", "Quests you can pick up",
     "Wanted Poster" })
