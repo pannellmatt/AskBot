@@ -17,7 +17,29 @@ function CreateFrame()
     frames[#frames + 1] = f
     return f
 end
-C_Timer = { NewTicker = function(_, fn) tickerFn = fn; return { Cancel = function() tickerFn = nil end } end }
+-- Fake clock: timers run when the test calls advance(seconds).
+local now, timers = 0, {}
+local function newTimer(sec, fn)
+    local t = { due = now + sec, fn = fn }
+    function t:Cancel() self.cancelled = true end
+    timers[#timers + 1] = t
+    return t
+end
+local function advance(sec)
+    now = now + sec
+    local ran = true
+    while ran do
+        ran = false
+        for _, t in ipairs(timers) do
+            if not t.cancelled and not t.done and t.due <= now then t.done = true; ran = true; t.fn() end
+        end
+    end
+end
+C_Timer = {
+    NewTicker = function(_, fn) tickerFn = fn; return { Cancel = function() tickerFn = nil end } end,
+    NewTimer = newTimer,
+    After = function(sec, fn) newTimer(sec, fn) end,
+}
 local linkCallback
 EventRegistry = { RegisterCallback = function(_, event, fn) if event == "SetItemRef" then linkCallback = fn end end }
 SlashCmdList = {}
@@ -187,11 +209,27 @@ AtlasLoot = {
     Data = { Droprate = { GetData = function(_, npc, item) return rates[npc] and rates[npc][item] end } },
 }
 
--- Auctionator
+-- Auctionator: a price database, and a search that finds `ahListings` while the AH is open
+local ahPrices, ahAges = { [2589] = 1250 }, { [2589] = 0 }
+local ahListings = {}   -- item name -> price the next search will find
+local searches = 0
+local dbUpdated
+AuctionFrame = { shown = false, IsShown = function(self) return self.shown end }
 Auctionator = { API = { v1 = {
-    GetAuctionPriceByItemID = function(caller, id) assert(caller == "AskBot"); return ({ [2589] = 1250 })[id] end,
-    GetAuctionAgeByItemID = function(_, id) return ({ [2589] = 0 })[id] end,
+    GetAuctionPriceByItemID = function(caller, id) assert(caller == "AskBot"); return ahPrices[id] end,
+    GetAuctionAgeByItemID = function(_, id) return ahAges[id] end,
     GetVendorPriceByItemID = function() return nil end,
+    RegisterForDBUpdate = function(_, fn) dbUpdated = fn end,
+    MultiSearchExact = function(_, names)
+        if not AuctionFrame.shown then error("Auction house is not open") end
+        searches = searches + 1
+        for _, name in ipairs(names) do
+            for id, n in pairs(itemCache) do
+                if n == name and ahListings[name] then ahPrices[id], ahAges[id] = ahListings[name], 0 end
+            end
+        end
+        if dbUpdated then dbUpdated() end
+    end,
 } } }
 
 -- Load the addon in .toc order ------------------------------------------------------------
@@ -248,6 +286,35 @@ ask("what does hogger drop", "AtlasLoot has no loot table")
 ask("price of linen cloth", { "AH 12s 50c", "seen today", "vendors pay 13c" })
 ask("how much is rockslicer worth", "no AH price yet")
 ask("|cffffffff|Hitem:2589::|h[Linen Cloth]|h|r price", "AH 12s 50c")
+
+-- Refreshing prices: away from the AH it waits for the next visit, then reports changes
+ask("refresh prices", "I'll refresh 2 prices next time you open the auction house")
+ahListings["Linen Cloth"] = 1080
+AuctionFrame.shown = true
+do
+    local from = #output + 1
+    print("\n> (open the auction house)")
+    events.scripts.OnEvent(events, "AUCTION_HOUSE_SHOW")
+    advance(2)  -- AskBot starts the search
+    advance(4)  -- results settle
+    local text = table.concat(output, "\n", from)
+    for _, e in ipairs({ "refreshing 2 prices", "Price changes:", "12s 50c > ", "10s 80c", "1 not listed right now" }) do
+        if not text:find(e, 1, true) then failures = failures + 1; print("   !! FAIL: expected " .. e) end
+    end
+end
+-- At the AH, a price question is answered live
+ahListings["Linen Cloth"] = 900
+ask("price of linen cloth", "Checking the auction house")
+do
+    local from = #output + 1
+    advance(1)
+    if not table.concat(output, "\n", from):find("AH 9s |cffaaaaaa(seen today)", 1, true) then
+        failures = failures + 1; print("   !! FAIL: expected live price AH 9s")
+    end
+end
+ask("refresh prices", { "Refreshing 2 prices" })
+advance(4)
+AuctionFrame.shown = false
 ask("where does linen drop", { "Linen Cloth|r drops from", "Defias Thug" }, { "Linen Bag|r", "Did you mean" })
 ask("where can i buy linen", "Linen Shirt|r is sold by", { "Did you mean" })
 ask("where can i get linen", "Linen Cloth|r", { "Linen Bag|r" })

@@ -56,6 +56,8 @@ The auction house price, how old that price is, and what vendors pay.
 - `/ab price of Linen Cloth`
 - `/ab how much is [item] worth`
 
+Ask at the auction house and AskBot checks the live price for you. Away from it, you get the price from Auctionator's last scan. AskBot also keeps a list of the items you've asked about: `/ab refresh prices` re-checks them all, straight away at the auction house or automatically the next time you open it, and tells you what changed.
+
 ### NPCs by name
 - `/ab where is Gryan Stoutmantle`
 
@@ -91,6 +93,8 @@ Every answer has a **[pin]** link. The best answer is pinned automatically, and 
 | `/ab clear` | Remove the waypoint |
 | `/ab status` | What AskBot has loaded |
 | `/ab forget flights` | Forget learned flight paths |
+| `/ab refresh prices` | Re-check the prices you've asked about (needs Auctionator) |
+| `/ab forget prices` | Clear that price list |
 
 AskBot answers in whichever chat tab you type in, so you can give it a tab of its own.
 

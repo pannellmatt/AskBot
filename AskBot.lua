@@ -652,6 +652,29 @@ local function answerLoot(subject, quietIfMissing)
     return true
 end
 
+--- "[Linen Cloth]: AH 12s 50c (seen today), vendors pay 13c"
+local function priceLine(id)
+    local P = AskBot.Prices
+    local parts = {}
+    if P.Available() then
+        local price, age = P.Auction(id), P.AgeDays(id)
+        if price then
+            local when = age == 0 and "seen today" or age == 1 and "seen yesterday" or age and ("seen " .. age .. " days ago")
+                or "over 3 weeks old"
+            parts[#parts + 1] = "AH " .. P.Format(price) .. " " .. GREY .. "(" .. when .. ")|r"
+        else
+            parts[#parts + 1] = "no AH price yet " .. GREY .. "(ask again at the auction house)|r"
+        end
+        local vendorBuy = P.VendorBuy(id)
+        if vendorBuy then parts[#parts + 1] = "vendors sell it for " .. P.Format(vendorBuy) end
+    else
+        parts[#parts + 1] = GREY .. "install Auctionator for auction prices|r"
+    end
+    local sell = P.VendorSell(id)
+    if sell then parts[#parts + 1] = "vendors pay " .. P.Format(sell) end
+    return itemLinkText(id) .. ": " .. table.concat(parts, ", ")
+end
+
 local function answerPrice(query, hits)
     local P = AskBot.Prices
     local others
@@ -665,25 +688,58 @@ local function answerPrice(query, hits)
         return
     end
     local id = hits[1][2]
-    local parts = {}
-    if P.Available() then
-        local price, age = P.Auction(id), P.AgeDays(id)
-        if price then
-            local when = age == 0 and "seen today" or age == 1 and "seen yesterday" or age and ("seen " .. age .. " days ago")
-                or "over 3 weeks old"
-            parts[#parts + 1] = "AH " .. P.Format(price) .. " " .. GREY .. "(" .. when .. ")|r"
-        else
-            parts[#parts + 1] = "no AH price yet " .. GREY .. "(scan the auction house with Auctionator)|r"
-        end
-        local vendorBuy = P.VendorBuy(id)
-        if vendorBuy then parts[#parts + 1] = "vendors sell it for " .. P.Format(vendorBuy) end
-    else
-        parts[#parts + 1] = GREY .. "install Auctionator for auction prices|r"
-    end
-    local sell = P.VendorSell(id)
-    if sell then parts[#parts + 1] = "vendors pay " .. P.Format(sell) end
-    say(itemLinkText(id) .. ": " .. table.concat(parts, ", "))
     didYouMean(others, "price of %s")
+    if not P.Available() then return say(priceLine(id)) end
+
+    P.Watch(id) -- remembered for /ab refresh prices
+    if not P.IsAHOpen() then return say(priceLine(id)) end
+
+    -- At the auction house: look it up live, then answer with the fresh price.
+    say(GREY .. "Checking the auction house for|r " .. itemLinkText(id) .. GREY .. "...|r")
+    P.Refresh({ id }, function(results, reason)
+        local r = results[1]
+        local fresh = r and r.age == 0
+        say(priceLine(id) .. ((reason ~= "done" or not fresh) and (GREY .. " (not listed right now)|r") or ""))
+    end)
+end
+
+--- /ab refresh prices: search the AH now if it's open, else at the next visit.
+local function refreshPrices(automatic)
+    local P = AskBot.Prices
+    if not P.Available() then return say("I need Auctionator installed to refresh prices.") end
+    local ids = P.WatchedIds()
+    if #ids == 0 then
+        return say("Ask me some prices first (" .. GOLD .. "/ab price of Linen Cloth|r) and I'll keep a list to refresh.")
+    end
+    if not P.IsAHOpen() then
+        AskBotCharDB.refreshPending = true
+        return say("I'll refresh " .. #ids .. " price" .. (#ids == 1 and "" or "s") .. " next time you open the auction house.")
+    end
+
+    AskBotCharDB.refreshPending = nil
+    say((automatic and "Auction house open: refreshing " or "Refreshing ") .. #ids .. " price" .. (#ids == 1 and "" or "s") .. "...")
+    P.Refresh(ids, function(results, reason)
+        local changed, same, missing = {}, 0, 0
+        for _, r in ipairs(results) do
+            if not (r.after and r.age == 0) then
+                missing = missing + 1
+            elseif r.before and r.before ~= r.after then
+                local arrow = r.after < r.before and "|cff66cc33" or "|cffff6060"
+                changed[#changed + 1] = itemLinkText(r.id) .. " " .. P.Format(r.before) .. " > " .. arrow .. P.Format(r.after) .. "|r"
+            elseif not r.before then
+                changed[#changed + 1] = itemLinkText(r.id) .. " now " .. P.Format(r.after)
+            else
+                same = same + 1
+            end
+        end
+        say(#changed > 0 and "Price changes:" or "No price changes.")
+        for _, line in ipairs(changed) do say("  " .. line) end
+        local notes = {}
+        if same > 0 then notes[#notes + 1] = same .. " unchanged" end
+        if missing > 0 then notes[#notes + 1] = missing .. " not listed right now" end
+        if reason ~= "done" then notes[#notes + 1] = "the search didn't finish (" .. reason .. ")" end
+        if #notes > 0 then say(GREY .. "  (" .. table.concat(notes, ", ") .. ")|r") end
+    end)
 end
 
 --------------------------------------------------------------------------------------------
@@ -945,6 +1001,7 @@ end
 local events = CreateFrame("Frame")
 events:RegisterEvent("PLAYER_LOGIN")
 events:RegisterEvent("TAXIMAP_OPENED")
+events:RegisterEvent("AUCTION_HOUSE_SHOW")
 events:SetScript("OnEvent", function(_, event)
     if event == "PLAYER_LOGIN" then
         AskBotCharDB = AskBotCharDB or {}
@@ -954,6 +1011,11 @@ events:SetScript("OnEvent", function(_, event)
         local ok, learned = pcall(D.RecordTaxiNodes)
         if ok and learned and learned > 0 then
             say("Learned " .. learned .. " flight path" .. (learned == 1 and "" or "s") .. " for route planning.")
+        end
+    elseif event == "AUCTION_HOUSE_SHOW" then
+        -- A refresh was asked for away from the AH; give Auctionator a moment to set up.
+        if AskBotCharDB and AskBotCharDB.refreshPending then
+            C_Timer.After(1.5, function() refreshPrices(true) end)
         end
     end
 end)
@@ -972,6 +1034,7 @@ local function help()
     say("  /askbot what does VanCleef drop    /askbot Deadmines loot    /askbot price of Linen Cloth")
     say("Click " .. "|cff71d5ff[pin]|r" .. " on any answer to put a pin on it.")
     say("/askbot clear - remove the pin.  /askbot status - index info.  Also /ab and /ask.")
+    say("/askbot refresh prices - re-check prices you've asked about (now at the AH, or on your next visit).")
 end
 
 local function status()
@@ -985,7 +1048,11 @@ local function status()
     local L = AskBot.Loot
     local loot = L.status == "absent" and "not installed" or L.status == "loading" and "loading..."
         or string.format("%d dungeons/raids, %d bosses", #L.instances, #L.bossNames)
-    say("AtlasLoot: " .. loot .. ".  Auctionator: " .. (AskBot.Prices.Available() and "yes" or "not installed") .. ".")
+    local watched = #AskBot.Prices.WatchedIds()
+    say("AtlasLoot: " .. loot .. ".  Auctionator: " .. (AskBot.Prices.Available()
+        and ("yes, " .. watched .. " price" .. (watched == 1 and "" or "s") .. " on your refresh list"
+            .. (AskBotCharDB.refreshPending and " (refresh at next AH visit)" or ""))
+        or "not installed") .. ".")
     if D.status == "ready" then
         local parts = {}
         for _, t in ipairs(AskBot.targets) do
@@ -1009,6 +1076,12 @@ local function onSlash(msg, editBox)
     elseif cmd == "forget flights" then
         AskBotCharDB.knownTaxi = {}
         say("Forgot known flight paths.")
+    elseif cmd == "refresh" or cmd == "refresh prices" or cmd == "refresh ah" or cmd == "refresh auction"
+        or cmd == "refresh auctions" or cmd == "refresh auction house" then
+        refreshPrices(false)
+    elseif cmd == "forget prices" then
+        AskBotCharDB.priceWatch, AskBotCharDB.refreshPending = {}, nil
+        say("Forgot the price list.")
     else
         AskBot.Ask(msg)
     end

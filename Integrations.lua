@@ -187,6 +187,78 @@ function Prices.VendorSell(id)
     return (sell and sell > 0) and sell or nil
 end
 
+--- Is the auction house window open? (Searches only work then.)
+function Prices.IsAHOpen()
+    return (AuctionFrame and AuctionFrame:IsShown()) or (AuctionHouseFrame and AuctionHouseFrame:IsShown()) or false
+end
+
+-- Auctionator calls us back whenever new prices are stored (a search or a full scan).
+local updateListeners = {}
+local registeredForUpdates = false
+local function listenForUpdates()
+    if registeredForUpdates or not (Prices.Available() and Auctionator.API.v1.RegisterForDBUpdate) then return end
+    registeredForUpdates = pcall(Auctionator.API.v1.RegisterForDBUpdate, ADDON_NAME, function()
+        for token, fn in pairs(updateListeners) do fn(token) end
+    end)
+end
+
+local function itemNameFor(id)
+    return (C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(id)) or (ItemDB and ItemDB.name(id))
+end
+
+--- Search the open auction house for these items through Auctionator, then call
+--- onDone(results, reason) with results = { { id, before, after, age }, ... }.
+--- reason is "done", "timeout", or an error message.
+function Prices.Refresh(ids, onDone)
+    local names, results = {}, {}
+    for _, id in ipairs(ids) do
+        local name = itemNameFor(id)
+        if name then
+            names[#names + 1] = name
+            results[#results + 1] = { id = id, before = Prices.Auction(id) }
+        end
+    end
+    if #names == 0 then return onDone(results, "no item names") end
+    listenForUpdates()
+
+    local token, finished, quietTimer, limitTimer = {}, false, nil, nil
+    local function finish(reason)
+        if finished then return end
+        finished = true
+        updateListeners[token] = nil
+        if quietTimer then quietTimer:Cancel() end
+        if limitTimer then limitTimer:Cancel() end
+        for _, r in ipairs(results) do
+            r.after, r.age = Prices.Auction(r.id), Prices.AgeDays(r.id)
+        end
+        onDone(results, reason)
+    end
+    -- Results can arrive in several batches; finish once they've been quiet for a moment.
+    updateListeners[token] = function()
+        if quietTimer then quietTimer:Cancel() end
+        quietTimer = C_Timer.NewTimer(#names > 1 and 3 or 0.5, function() finish("done") end)
+    end
+    limitTimer = C_Timer.NewTimer(math.min(120, 10 + 3 * #names), function() finish("timeout") end)
+
+    local ok, err = pcall(Auctionator.API.v1.MultiSearchExact, ADDON_NAME, names)
+    if not ok then finish(tostring(err)) end
+end
+
+--- Items whose prices this character has asked about, for /ab refresh prices.
+function Prices.Watch(id)
+    if AskBotCharDB then
+        AskBotCharDB.priceWatch = AskBotCharDB.priceWatch or {}
+        AskBotCharDB.priceWatch[id] = true
+    end
+end
+
+function Prices.WatchedIds()
+    local ids = {}
+    for id in pairs(AskBotCharDB and AskBotCharDB.priceWatch or {}) do ids[#ids + 1] = id end
+    table.sort(ids)
+    return ids
+end
+
 function Prices.Format(copper)
     if GetMoneyString then return GetMoneyString(copper, true) end
     local g, s, c = math.floor(copper / 10000), math.floor(copper / 100) % 100, copper % 100
