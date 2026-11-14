@@ -317,9 +317,56 @@ local function finishedObjectiveTexts(id)
 end
 
 --- The quest's objectives as { verb, name, places, showLevel }.
+--- Where an item comes from: Questie's drops, else items that contain it, else AskBot's
+--- community locations. Returns places and whether they are community info.
+local function itemSources(itemId)
+    local drops = placesForIds(ItemDB.npcDrops(itemId), ItemDB.objectDrops(itemId))
+    if #drops > 0 then return drops, false end
+    for _, container in ipairs(ItemDB.itemDrops(itemId) or {}) do
+        for _, p in ipairs(placesForIds(ItemDB.npcDrops(container), ItemDB.objectDrops(container))) do
+            drops[#drops + 1] = p
+        end
+    end
+    if #drops > 0 then return drops, false end
+    local known = AskBot.KNOWN_ITEM_LOCATIONS and AskBot.KNOWN_ITEM_LOCATIONS[itemId]
+    local points = known and (known[D.PlayerFaction() or ""] or known.N)
+    if points then
+        local spawns = D.SpawnsFromMapPoints(points)
+        if #spawns > 0 then
+            return { { kind = "known", name = known.note or itemName(itemId), spawns = spawns } }, true
+        end
+    end
+    return drops, false
+end
+
+--- How many of an item are in your bags.
+local function bagCount(itemId)
+    local count = (C_Item and C_Item.GetItemCount) or GetItemCount
+    return count and (count(itemId) or 0) or 0
+end
+
 local function questObjectives(id)
     local list = {}
     local o = QuestDB.objectives(id) or {}
+
+    -- Items the quest needs you to bring (e.g. two halves to combine into the objective item).
+    -- One you're carrying shows as "Got"; the rest get directions.
+    local objectiveItems = {}
+    for _, c in ipairs(o[3] or {}) do objectiveItems[c[1]] = true end
+    local sourceItems = QuestDB.requiredSourceItems and QuestDB.requiredSourceItems(id) or {}
+    local needsSources = false
+    for _, itemId in ipairs(sourceItems) do
+        if not objectiveItems[itemId] then
+            needsSources = true
+            if bagCount(itemId) > 0 then
+                list[#list + 1] = { "Got", itemName(itemId), {}, false, false, true, true }
+            else
+                local places, community = itemSources(itemId)
+                list[#list + 1] = { "Collect", itemName(itemId), places, true, community, false, true }
+            end
+        end
+    end
+
     for _, c in ipairs(o[1] or {}) do -- creatures to kill
         local p = D.NpcPlace(c[1])
         if p then list[#list + 1] = { "Kill", c[2] or p.name, placesForIds({ c[1] }), true } end
@@ -329,26 +376,9 @@ local function questObjectives(id)
         if p then list[#list + 1] = { "Use", c[2] or p.name, placesForIds(nil, { c[1] }) } end
     end
     for _, c in ipairs(o[3] or {}) do -- items to collect
-        local drops = placesForIds(ItemDB.npcDrops(c[1]), ItemDB.objectDrops(c[1]))
-        local community
-        if #drops == 0 then
-            -- Not placed by Questie: try items that contain it, then AskBot's own known locations.
-            for _, container in ipairs(ItemDB.itemDrops(c[1]) or {}) do
-                for _, p in ipairs(placesForIds(ItemDB.npcDrops(container), ItemDB.objectDrops(container))) do
-                    drops[#drops + 1] = p
-                end
-            end
-            local known = #drops == 0 and AskBot.KNOWN_ITEM_LOCATIONS and AskBot.KNOWN_ITEM_LOCATIONS[c[1]]
-            local points = known and (known[D.PlayerFaction() or ""] or known.N)
-            if points then
-                local spawns = D.SpawnsFromMapPoints(points)
-                if #spawns > 0 then
-                    drops[1] = { kind = "known", name = known.note or itemName(c[1]), spawns = spawns }
-                    community = true
-                end
-            end
-        end
-        list[#list + 1] = { "Collect", c[2] or itemName(c[1]), drops, true, community }
+        local places, community = itemSources(c[1])
+        -- With items to bring, the objective item is made from them ("Make X at: shrine").
+        list[#list + 1] = { needsSources and "Make" or "Collect", c[2] or itemName(c[1]), places, true, community }
     end
     for _, c in ipairs(o[5] or {}) do -- kill credit (any of several NPCs counts)
         list[#list + 1] = { "Kill", c[3] or NpcDB.name(c[2]) or "target", placesForIds(c[1]), true }
@@ -390,11 +420,19 @@ local function questTasks(id)
             end
             if not finished then
                 objectives[#objectives + 1] = {
-                    verb = obj[1], name = objName, showLevel = obj[4], community = obj[5],
+                    verb = obj[1], name = objName, showLevel = obj[4], community = obj[5], have = obj[6], source = obj[7],
                     best = #obj[3] > 0 and D.Rank(obj[3])[1] or nil,
                 }
             end
         end
+    end
+    -- While an item to bring is still missing, making the objective item comes later.
+    local waiting = false
+    for _, o in ipairs(objectives) do
+        if o.source and not o.have then waiting = true end
+    end
+    for _, o in ipairs(objectives) do
+        if waiting and o.verb == "Make" then o.later = true end
     end
     local who = QuestDB.finishedBy(id) or {}
     return complete, objectives, D.Rank(placesForIds(who[1], who[2]))[1]
@@ -402,6 +440,10 @@ end
 
 --- "Collect Linen Cloth from: Defias Thug lvl 9-10 - Westfall ... [pin]"
 local function objectiveText(o)
+    if o.have then return "|cff66cc33Got|r " .. GOLD .. o.name .. "|r" end
+    if o.verb == "Make" and o.best then
+        return "Then make " .. GOLD .. o.name .. "|r at: " .. describe(o.best, o.name)
+    end
     if not o.best then
         return o.verb .. " " .. GOLD .. o.name .. "|r " .. GREY .. "(Questie doesn't know where)|r"
     end
@@ -413,11 +455,16 @@ local function answerQuestInLog(id, name)
     local complete, objectives, turnIn = questTasks(id)
     say("Quest " .. GOLD .. name .. "|r " .. (complete and "is complete:" or "is in progress:"))
 
-    local nearest
+    -- Pin the nearest step; items you still need to bring come first.
+    local nearest, nearestSource
     for _, o in ipairs(objectives) do
         say("  " .. objectiveText(o))
-        if o.best and (not nearest or quicker(o.best, nearest)) then nearest = o.best end
+        if o.best and not o.later and (not nearest or quicker(o.best, nearest)) then nearest = o.best end
+        if o.best and o.source and not o.have and (not nearestSource or quicker(o.best, nearestSource)) then
+            nearestSource = o.best
+        end
     end
+    nearest = nearestSource or nearest
     if turnIn then
         say("  Turn in: " .. describe(turnIn, "turn in"))
     else
@@ -503,7 +550,9 @@ local function answerItem(query, mode, hits, others)
         -- For partial names, prefer items that fit the question ("linen" + drop -> Linen Cloth).
         -- (Items named only by AtlasLoot aren't in Questie's ItemDB, so guard every read.)
         local function has(field) return function(e) local v = ItemDB[field](e[2]); return v ~= nil and #v > 0 end end
-        local function bossLoot(e) return AskBot.Loot.byItem[e[2]] ~= nil end
+        local function bossLoot(e)
+            return AskBot.Loot.byItem[e[2]] ~= nil or (AskBot.KNOWN_ITEM_LOCATIONS[e[2]] ~= nil)
+        end
         local accept
         if mode == "buy" then
             accept = has("vendors")
@@ -589,8 +638,17 @@ local function answerItem(query, mode, hits, others)
             end
         end
 
-        if #droppers == 0 and #bossSources == 0 and mode == "drop" then
-            say("Neither Questie nor AtlasLoot lists anything that drops " .. GOLD .. name .. "|r.")
+        if #droppers == 0 and #bossSources == 0 then
+            -- Not in Questie or AtlasLoot: AskBot's community locations.
+            local places, community = itemSources(hits[1][2])
+            if community then
+                anything = true
+                local b = showRanked(places, GOLD .. name .. "|r is found in:", name, 1)
+                say(GREY .. "  (community info)|r")
+                best = best or b
+            elseif mode == "drop" then
+                say("Neither Questie nor AtlasLoot lists anything that drops " .. GOLD .. name .. "|r.")
+            end
         end
     end
 
@@ -868,7 +926,7 @@ local function answerWhatsNext()
             if turnIn then turnIns[#turnIns + 1] = { quest = q.id, name = name, r = turnIn } else unknown = unknown + 1 end
         else
             for _, o in ipairs(objs) do
-                if o.best then objectives[#objectives + 1] = { quest = q.id, name = name, o = o, r = o.best } end
+                if o.best and not o.later then objectives[#objectives + 1] = { quest = q.id, name = name, o = o, r = o.best } end
             end
         end
     end
@@ -1846,6 +1904,11 @@ local function debugQuest(text)
     end
     for _, c in ipairs(o[5] or {}) do
         say("  kill credit " .. tostring(c[2]) .. " from " .. count(c[1]) .. " npcs")
+    end
+    for _, itemId in ipairs(QuestDB.requiredSourceItems and QuestDB.requiredSourceItems(id) or {}) do
+        say("  bring item " .. itemId .. " " .. itemName(itemId) .. ": " .. bagCount(itemId) .. " in your bags, dropped by "
+            .. count(ItemDB.npcDrops(itemId)) .. " npcs, " .. count(ItemDB.objectDrops(itemId)) .. " objects"
+            .. (AskBot.KNOWN_ITEM_LOCATIONS[itemId] and ", has a community location" or ""))
     end
     local trigger = QuestDB.triggerEnd(id)
     if trigger then say("  explore: " .. tostring(trigger[1]) .. ", " .. #D.ResolveSpawns(trigger[2]) .. " spots") end

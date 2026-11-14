@@ -91,10 +91,11 @@ local hbd = {
 }
 LibStub = function() return hbd end
 
-local tomtomWaypoints = 0
+local tomtomWaypoints, lastPinTitle = 0, nil
 TomTom = {
     AddWaypoint = function(_, map, x, y, opts)
         tomtomWaypoints = tomtomWaypoints + 1
+        lastPinTitle = opts.title
         print(string.format("   [TomTom] %s at %s %.3f,%.3f", opts.title, maps[map][1], x, y))
         return tomtomWaypoints
     end,
@@ -167,8 +168,8 @@ local quests = {
     [136] = { "After Done", 1, { { 25 } }, { { 25 } }, 13, 10 },
     [137] = { "Lead-in", 1, { { 25 } }, { { 25 } }, 12, 10 },
     [124] = { "Trial of the Sea Lion", 1, { { 9 } }, { { 9 } }, 16, 16,          -- items Questie cannot place
-        { nil, nil, { { 15883 }, { 15882 } } }, nil,
-        { { { [W] = { { 30, 30 } } }, 0, "Combine the halves at the shrine" } } },
+        { nil, nil, { { 15885 } } }, nil,                                  -- objective: the combined pendant
+        { { { [W] = { { 30, 30 } } }, 0, "Speak with the spirit" } }, { 15882, 15883 } },  -- halves to bring
 }
 -- What Questie's IsDoable would say (completed quests, prerequisites, etc.)
 local doable = { [102] = true, [105] = true, [106] = true, [107] = true, [109] = true, [110] = true,
@@ -207,11 +208,12 @@ local items = {
     [3000] = { name = "Gryan's Medal", questRewards = { 100 } },
     [15883] = { name = "Half Pendant of Aquatic Agility" },
     [15882] = { name = "Half Pendant of Aquatic Endurance" },
+    [15885] = { name = "Pendant of the Sea Lion", objectDrops = { 501 } },
     [4238] = { name = "Linen Bag" },
     [2570] = { name = "Linen Shirt", vendors = { 12 } },
     [2996] = { name = "Bolt of Linen Cloth" },
 }
-local objects = { [500] = { "Wanted Poster", { [W] = { { 53, 52 } } } } }
+local objects = { [500] = { "Wanted Poster", { [W] = { { 53, 52 } } } }, [501] = { "Shrine of Remulos", { [W] = { { 20, 80 } } } } }
 
 local function ids(t) local out = {} for id in pairs(t) do out[#out + 1] = id end table.sort(out) return out end
 NpcDB = {
@@ -237,6 +239,7 @@ QuestDB = {
     objectives = function(id) return quests[id][7] end,
     triggerEnd = function(id) return quests[id][8] end,
     extraObjectives = function(id) return quests[id][9] end,
+    requiredSourceItems = function(id) return quests[id][10] end,
     preQuestSingle = function(id) return chain[id] and chain[id].single end,
     preQuestGroup = function(id) return chain[id] and chain[id].group end,
     nextQuestInChain = function(id) return chain[id] and chain[id].nextQuest end,
@@ -267,11 +270,13 @@ QuestieLoader = { ImportModule = function() return {
 } end }
 
 -- Game item cache: names for gear Questie doesn't know; 2589 has a link and vendor price.
+local bags = {}  -- item id -> count in your bags
 local itemCache = { [5193] = "Cape of the Brotherhood", [5202] = "Corsair's Overshirt",
     [10399] = "Blackened Defias Armor", [872] = "Rockslicer", [2589] = "Linen Cloth" }
 C_Item = {
     GetItemNameByID = function(id) return itemCache[id] end,
     RequestLoadItemDataByID = function() end,
+    GetItemCount = function(id) return bags[id] or 0 end,
     GetItemInfo = function(id)
         if id == 2589 then return "Linen Cloth", "|cffffffff|Hitem:2589::|h[Linen Cloth]|h|r", 1, 5, 0, "Trade Goods", "Cloth", 20, "", 0, 13 end
     end,
@@ -511,18 +516,36 @@ ask("skinner please", { "Horde Skinner", "Orc Skinner|r <Skinning Trainer> - Org
     { "Helene", "other continent" })
 faction = "Alliance"
 
--- Quest items Questie can't place: AskBot's community locations, per faction
+-- Quest items Questie can't place, modelled as Questie has Trial of the Sea Lion: the objective
+-- is the combined pendant (made at a shrine); the two halves are items the quest needs you to
+-- bring, which Questie doesn't place. You already carry the Agility half.
 questLog[124] = { complete = false, objectives = {} }
-ask("[[16] Trial of the Sea Lion (124)]", { "is in progress:",
-    "Collect |cffffd100Half Pendant of Aquatic Agility|r from: |cffffd100Strange Lockbox (underwater)|r - Westfall 17.9, 33.0",
-    "Collect |cffffd100Half Pendant of Aquatic Endurance|r from: |cffffd100Strange Lockbox|r - Darkshore 48.9, 11.3",
-    "(community info)", "Do: |cffffd100Combine the halves at the shrine" }, { "doesn't know where" })
+bags[15883] = 1
+do
+    local pins = tomtomWaypoints
+    ask("[[16] Trial of the Sea Lion (124)]", { "is in progress:",
+        "|cff66cc33Got|r |cffffd100Half Pendant of Aquatic Agility",
+        "Collect |cffffd100Half Pendant of Aquatic Endurance|r from: |cffffd100Strange Lockbox|r - Darkshore 48.9, 11.3",
+        "(community info)", "Then make |cffffd100Pendant of the Sea Lion|r at: |cffffd100Shrine of Remulos",
+        "Do: |cffffd100Speak with the spirit" }, { "doesn't know where", "Westfall 17.9" })
+    -- The pin goes to the missing half, not the shrine (making the pendant comes later).
+    if not (tomtomWaypoints == pins + 1 and lastPinTitle and lastPinTitle:find("Strange Lockbox", 1, true)) then
+        failures = failures + 1; print("   !! FAIL: expected the pin on the missing half, got " .. tostring(lastPinTitle))
+    end
+end
+bags[15883] = nil
+ask("[[16] Trial of the Sea Lion (124)]", { "Collect |cffffd100Half Pendant of Aquatic Agility|r from: "
+    .. "|cffffd100Strange Lockbox (underwater)|r - Westfall 17.9, 33.0" })
 faction = "Horde"
-ask("[[16] Trial of the Sea Lion (124)]", { "The Barrens 56.7, 8.3" }, { "Darkshore 48.9" })
+ask("[[16] Trial of the Sea Lion (124)]", { "The Barrens 56.7, 8.3", "29.6, 29.5" }, { "Darkshore 48.9" })
 faction = "Alliance"
-ask("debug quest [[16] Trial of the Sea Lion (124)]", { "Quest 124", "collect item 15883 Half Pendant of Aquatic Agility",
-    "0 npcs, 0 objects", "has a community location", "extra: Combine the halves at the shrine, 1 spots" })
+ask("debug quest [[16] Trial of the Sea Lion (124)]", { "Quest 124", "collect item 15885 Pendant of the Sea Lion",
+    "0 npcs, 1 objects", "bring item 15882 Half Pendant of Aquatic Endurance", "has a community location",
+    "extra: Speak with the spirit, 1 spots" })
 questLog[124] = nil
+-- Asking about a half directly also uses the community location
+ask("where can i get half pendant of aquatic endurance", { "Half Pendant of Aquatic Endurance|r is found in:",
+    "Darkshore 48.9, 11.3", "(community info)" })
 
 -- Quest chains (Questie would say Part 1, Side Errand, After Done and Lead-in can be taken now)
 for _, id in ipairs({ 130, 133, 136, 137 }) do doable[id] = true end
