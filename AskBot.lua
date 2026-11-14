@@ -168,6 +168,18 @@ local function whereText(r, label)
     return where .. how .. " " .. pinLink(p, s, label)
 end
 
+--- Compact travel for one-line answers: "75 yds", "~2 min", "~7 min flying", "~8 min by boat".
+local function shortHow(r)
+    if not r.time then return r.dist and formatYards(r.dist) or "other continent" end
+    local by
+    for _, s in ipairs(r.steps or {}) do
+        if s.kind == "boat" or s.kind == "zeppelin" then by = " by " .. s.kind; break end
+        if s.kind == "fly" then by = " flying" end
+    end
+    if not by and r.dist and r.dist < 1000 then return formatYards(r.dist) end
+    return formatTime(r.time) .. (by or "")
+end
+
 local function formatRate(rate)
     if not rate then return "" end
     local text = rate >= 10 and tostring(math.floor(rate + 0.5)) or string.format("%.1f", rate)
@@ -926,11 +938,12 @@ local function answerQuestsHere(ids, maxGivers)
         table.sort(g.quests, function(a, b) return (QuestDB.questLevel(a) or 0) < (QuestDB.questLevel(b) or 0) end)
         local names = {}
         for j, id in ipairs(g.quests) do
-            if j > 4 then names[#names + 1] = GREY .. "+" .. (#g.quests - 4) .. " more|r"; break end
+            if j > 3 then names[#names + 1] = GREY .. "+" .. (#g.quests - 3) .. "|r"; break end
             names[#names + 1] = questLabel(id)
         end
-        say("  " .. describe(g.r, "quests"))
-        say("      " .. table.concat(names, ", "))
+        -- One line per giver: "Gryan Stoutmantle, 68 yds [pin]: [14] Patrolling Westfall, [15] Westfall Stew +1"
+        say("  " .. GOLD .. g.r.place.name .. "|r, " .. shortHow(g.r) .. " " .. pinLink(g.r.place, g.r.spawn, "quests")
+            .. ": " .. table.concat(names, ", "))
     end
     return list[1].r
 end
@@ -1089,7 +1102,7 @@ local function answerZones(level, ids, maxZones, debug)
     end
     table.sort(list, function(a, b) return a.score > b.score end)
 
-    say("Best zones to quest in at level " .. level .. ":")
+    say("Where to quest at level " .. level .. ":")
     local firstHub
     for i = 1, math.min(maxZones, #list) do
         local z = list[i]
@@ -1100,16 +1113,16 @@ local function answerZones(level, ids, maxZones, debug)
         local lo = levels[math.floor(#levels * 0.15) + 1]
         local hi = levels[math.max(1, math.ceil(#levels * 0.85))]
         local counts = {}
-        if #z.active > 0 then counts[#counts + 1] = #z.active .. " of your quests" end
-        if #z.levels > 0 then counts[#counts + 1] = #z.levels .. " new quest" .. (#z.levels == 1 and "" or "s") end
+        if #z.active > 0 then counts[#counts + 1] = #z.active .. " yours" end
+        if #z.levels > 0 then counts[#counts + 1] = #z.levels .. " new" end
         local zoneName = D.ZoneName(z.map)
-        say("  " .. GOLD .. zoneName .. "|r: " .. table.concat(counts, " + ")
-            .. (lo > 0 and (" (mostly level " .. lo .. (hi > lo and ("-" .. hi) or "") .. ")") or ""))
-        if z.activeR then
-            say("      continue at " .. describe(z.activeR, zoneName))
-        elseif z.r then
-            say("      start at " .. describe(z.r, zoneName) .. GREY .. " - " .. z.hub.n .. " quest" .. (z.hub.n == 1 and "" or "s") .. "|r")
+        -- One line per zone: "1. Redridge Mountains: 10 yours + 3 new, lvl 15-26 - Glinting Mud, 75 yds [pin]"
+        local line = i .. ". " .. GOLD .. zoneName .. "|r: " .. table.concat(counts, " + ")
+            .. (lo > 0 and (", lvl " .. lo .. (hi > lo and ("-" .. hi) or "")) or "")
+        if z.r then
+            line = line .. " - " .. z.r.place.name .. ", " .. shortHow(z.r) .. " " .. pinLink(z.r.place, z.r.spawn, zoneName)
         end
+        say("  " .. line)
         firstHub = firstHub or z.r
     end
 

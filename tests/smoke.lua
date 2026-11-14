@@ -450,10 +450,10 @@ ask("what quests can i get", "Patrolling Westfall")
 -- then Darkshore (as good, but across the sea). Horde givers' quests and capitals never appear.
 do
     local from = #output + 1
-    ask("where should i level", { "Best zones to quest in at level 20:",
-        "Westfall|r: 2 of your quests + 4 new quests", "continue at ",
-        "Redridge Mountains|r: 1 of your quests + 3 new quests (mostly level 15-22)", "Scout the Redridge camp",
-        "Darkshore|r: 3 new quests" },
+    ask("where should i level", { "Where to quest at level 20:",
+        "1. |cffffd100Westfall|r: 2 yours + 4 new", "Gryan Stoutmantle, 68 yds",
+        "2. |cffffd100Redridge Mountains|r: 1 yours + 3 new, lvl 15-22", "Scout the Redridge camp",
+        "3. |cffffd100Darkshore|r: 3 new, lvl 19-21", "~6 min by boat" },
         { "The Barrens", "Stormwind City|r:", "Horde Errand" })
     local text = table.concat(output, "\n", from)
     local function pos(s) return text:find(s, 1, true) or math.huge end
@@ -466,9 +466,9 @@ C_Map.GetBestMapForUnit = function() return 1436 end
 ask("zones debug", { "|cffffd100Westfall|r|cffaaaaaa: 10", "counted", "in your log", "too easy (grey)",
     "How these were ranked", "of yours", "away, score" }, { "The Barrens" })
 ask("quests here", "Quests you can pick up", { "Thork", "Horde Errand" })
-ask("zones for level 14", { "Best zones to quest in at level 14:", "Westfall|r: 2 of your quests + 4 new quests" },
+ask("zones for level 14", { "Where to quest at level 14:", "Westfall|r: 2 yours + 4 new" },
     { "Too Easy" })
-ask("where should i quest next?", { "Best zones to quest in at level 20:", "Redridge Mountains", "Quests you can pick up",
+ask("where should i quest next?", { "Where to quest at level 20:", "Redridge Mountains", "Quests you can pick up",
     "Wanted Poster" })
 ask("dungeons", { "Dungeons for level 20:", "The Deadmines|r (10-26)", "[loot]", "entrance Westfall 42.6, 71.8" },
     { "Blackrock Depths" })
