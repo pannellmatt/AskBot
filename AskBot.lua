@@ -57,7 +57,34 @@ local pendingQuestion -- asked before the index was ready
 
 local lastTomTomWaypoint
 
+-- "/ab show all ...": icons on the world map and minimap for every place an answer found.
+local mapIcons, mapIconPool = {}, {}
+local mapCapture -- while answering "show all": list of places the answer showed
+
+local function hbdPins()
+    return LibStub and LibStub("HereBeDragons-Pins-2.0", true)
+end
+
+local function clearMapIcons()
+    local pins = hbdPins()
+    if pins then
+        pcall(pins.RemoveAllWorldMapIcons, pins, AskBot)
+        pcall(pins.RemoveAllMinimapIcons, pins, AskBot)
+    end
+    for _, icon in ipairs(mapIcons) do
+        icon:Hide()
+        mapIconPool[#mapIconPool + 1] = icon
+    end
+    mapIcons = {}
+end
+
+local function captureForMap(places)
+    if not mapCapture then return end
+    for _, p in ipairs(places) do mapCapture[#mapCapture + 1] = p end
+end
+
 local function clearPins()
+    clearMapIcons()
     if lastTomTomWaypoint and TomTom and TomTom.RemoveWaypoint then
         pcall(TomTom.RemoveWaypoint, TomTom, lastTomTomWaypoint)
     end
@@ -176,6 +203,7 @@ local function shortHow(r)
     if not r.time then return r.dist and formatYards(r.dist) or "other continent" end
     local by
     for _, s in ipairs(r.steps or {}) do
+        if s.kind == "hearth" then by = " via hearth"; break end
         if s.kind == "boat" or s.kind == "zeppelin" then by = " by " .. s.kind; break end
         if s.kind == "fly" then by = " flying" end
     end
@@ -203,6 +231,7 @@ end
 --- Returns the best result.
 local function showRanked(places, heading, label, max, opts)
     opts = opts or {}
+    captureForMap(places)
     local results, havePosition = D.Rank(places)
     if #results == 0 then return nil end
     if heading then
@@ -218,6 +247,53 @@ local function showRanked(places, heading, label, max, opts)
         say(GREY .. "  (No position known, so these aren't sorted by distance.)|r")
     end
     return results[1]
+end
+
+--- Put an icon on the world map and minimap for every spawn of every captured place.
+--- Returns how many icons went up (at most `max`), or nil if the map library is missing.
+local function showOnMap(places, label, max)
+    local pins = hbdPins()
+    if not pins or not CreateFrame then return nil end
+    clearMapIcons()
+    local n = 0
+    for _, place in ipairs(places) do
+        for _, s in ipairs(place.spawns or {}) do
+            if n >= max then return n end
+            if s.uiMapId and s.x then
+                local icon = table.remove(mapIconPool)
+                if not icon then
+                    icon = CreateFrame("Button", nil, UIParent)
+                    icon:SetSize(14, 14)
+                    local tex = icon:CreateTexture(nil, "OVERLAY")
+                    tex:SetAllPoints()
+                    tex:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcon_1")
+                    icon:SetScript("OnEnter", function(self)
+                        if GameTooltip then
+                            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                            GameTooltip:SetText(self.title or "")
+                            GameTooltip:Show()
+                        end
+                    end)
+                    icon:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+                    icon:SetScript("OnClick", function(self) placePin(self.place, self.spawn, self.label) end)
+                end
+                icon.place, icon.spawn, icon.label = place, s, label
+                icon.title = place.name .. (place.sub and (" <" .. place.sub .. ">") or "")
+                local ok = pcall(pins.AddWorldMapIconMap, pins, AskBot, icon, s.uiMapId, s.x / 100, s.y / 100,
+                    HBD_PINS_WORLDMAP_SHOW_PARENT or 1)
+                if ok then
+                    local mini = table.remove(mapIconPool)
+                    pcall(pins.AddMinimapIconMap, pins, AskBot, icon, s.uiMapId, s.x / 100, s.y / 100, true, false)
+                    if mini then mapIconPool[#mapIconPool + 1] = mini end
+                    mapIcons[#mapIcons + 1] = icon
+                    n = n + 1
+                else
+                    mapIconPool[#mapIconPool + 1] = icon
+                end
+            end
+        end
+    end
+    return n
 end
 
 local function pinBest(best, label)
@@ -2228,6 +2304,7 @@ local function answerGather(nodeNames, heading, noSkillNote)
     local prof = places[1].node.prof
     local rank = professionSkill(prof)
     for _, p in ipairs(places) do p.sub = skillLabel(p.node, rank) end
+    captureForMap(places)
     local results, havePosition = D.Rank(places)
     for i = 1, math.min(3, #results) do
         say((heading and "  " or "") .. describe(results[i]))
@@ -3491,6 +3568,28 @@ local function exactHits(list, query)
     if hits and hits[1][1] == D.NameKey(query) then return hits, others end
 end
 
+local HEARTH_QUESTIONS = {}
+for _, s in ipairs({ "hearth", "hearthstone", "my hearth", "my hearthstone", "where is my hearth", "where is my hearthstone",
+    "where does my hearth go", "where does my hearthstone go", "is my hearth ready", "hearth cooldown",
+    "hearthstone cooldown" }) do HEARTH_QUESTIONS[s] = true end
+
+--- "/ab hearth": where your hearthstone goes and when it's ready.
+local function answerHearth()
+    local h, known, current = D.Hearth()
+    if not h then
+        if known == false and current then
+            return say("Your hearthstone is set to " .. GOLD .. current .. "|r. Use it once (or set it again) and I'll learn"
+                .. " where that is, so travel times can include hearthing.")
+        end
+        return say("I don't see a hearthstone in your bags.")
+    end
+    local ready = h.remaining <= 0 and "|cff40ff40ready|r" or ("ready in " .. formatTime(h.remaining):gsub("^~", ""))
+    local spawn = h.uiMapId and h.x and { uiMapId = h.uiMapId, x = h.x, y = h.y }
+    say("Hearthstone: " .. GOLD .. h.name .. "|r" .. (h.uiMapId and (" (" .. D.ZoneName(h.uiMapId) .. ")") or "") .. ", " .. ready
+        .. (spawn and (" " .. pinLink({ name = h.name }, spawn, "hearth")) or "")
+        .. GREY .. ". Travel times use it when it's ready and saves a minute or more.|r")
+end
+
 local NPC_PREFIXES = { "where is ", "where are ", "who is ", "find ", "where can i find ", "where do i find " }
 
 local function answer(question)
@@ -3519,6 +3618,27 @@ local function answer(question)
         if intent == "after" then return answerAfter(nil, tonumber(questId)) end
         return answerQuest(nil, intent == "questEnd" and "end" or intent == "questStart" and "start" or "auto", { tonumber(questId) })
     end
+    if HEARTH_QUESTIONS[q] then return answerHearth() end
+
+    -- "show all skinning trainers": answer as usual, then put every place on the map.
+    local showAll = q:match("^show all (.+)$") or q:match("^show (.+) on the map$") or q:match("^show (.+) on map$")
+        or q:match("^map all (.+)$") or q:match("^put (.+) on the map$") or q:match("^put (.+) on map$")
+    if showAll and not AskBot.asker then
+        mapCapture = {}
+        local ok, err = pcall(answer, showAll)
+        local places = mapCapture
+        mapCapture = nil
+        if not ok then error(err, 0) end
+        if #places == 0 then return say(GREY .. "Nothing to put on the map for that.|r") end
+        local MAX = 200
+        local n = showOnMap(places, showAll, MAX)
+        if not n then return say("I need HereBeDragons (it comes with Questie) to put icons on the map.") end
+        local total = 0
+        for _, p in ipairs(places) do total = total + #(p.spawns or {}) end
+        return say("Put " .. n .. " icon" .. (n == 1 and "" or "s") .. " on your map" .. (total > n and (" (first " .. n .. " of " .. total .. ")") or "")
+            .. GREY .. ". Click one to pin it; /ab clear removes them.|r")
+    end
+
     -- Professions: "mats for Linen Bag", "recipe for X", "how do I level tailoring"
     if professionQuestion(q, function() return findTarget(q) ~= nil end) then return end
 
@@ -3762,11 +3882,13 @@ events:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 -- Profession window events differ between clients (classic trade skills and crafts, or the
 -- modern C_TradeSkillUI); registering one the client lacks is an error, so try each.
 for _, event in ipairs({ "TRADE_SKILL_SHOW", "TRADE_SKILL_UPDATE", "TRADE_SKILL_LIST_UPDATE",
-    "TRADE_SKILL_DATA_SOURCE_CHANGED", "CRAFT_SHOW", "CRAFT_UPDATE", "UPDATE_MOUSEOVER_UNIT", "PLAYER_TARGET_CHANGED" }) do
+    "TRADE_SKILL_DATA_SOURCE_CHANGED", "CRAFT_SHOW", "CRAFT_UPDATE", "UPDATE_MOUSEOVER_UNIT", "PLAYER_TARGET_CHANGED",
+    "UNIT_SPELLCAST_SUCCEEDED", "PLAYER_ENTERING_WORLD", "HEARTHSTONE_BOUND" }) do
     local valid = not (C_EventUtils and C_EventUtils.IsEventValid) or C_EventUtils.IsEventValid(event)
     if valid then pcall(events.RegisterEvent, events, event) end
 end
 local recordTimer
+local hearthPending
 
 -- Questie has no creature types, so remember which NPCs the game calls beasts as you meet
 -- them (account-wide: AskBotDB.creatureTypes[npcId] = 1 beast / 0 not). Skinning uses it.
@@ -3786,7 +3908,7 @@ local function learnCreature(unit)
     AskBotDB.creatureTypes = AskBotDB.creatureTypes or {}
     AskBotDB.creatureTypes[npcId] = (ctype == beastTypeName or ctype == "Beast") and 1 or 0
 end
-events:SetScript("OnEvent", function(_, event)
+events:SetScript("OnEvent", function(_, event, ...)
     if event == "PLAYER_LOGIN" then
         AskBotCharDB = AskBotCharDB or {}
         AskBotCharDB.knownTaxi = AskBotCharDB.knownTaxi or {}
@@ -3796,6 +3918,24 @@ events:SetScript("OnEvent", function(_, event)
         if ok and learned and learned > 0 then
             say("Learned " .. learned .. " flight path" .. (learned == 1 and "" or "s") .. " for route planning.")
         end
+    elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
+        -- Hearthstone used: where you arrive is where it goes (a loading screen may come first).
+        local unit, _, spellId = ...
+        if unit == "player" and spellId == 8690 then
+            hearthPending = true
+            C_Timer.After(3, function()
+                if hearthPending then hearthPending = false; pcall(D.RecordBind) end
+            end)
+        end
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        if hearthPending then
+            C_Timer.After(1, function()
+                if hearthPending then hearthPending = false; pcall(D.RecordBind) end
+            end)
+        end
+    elseif event == "HEARTHSTONE_BOUND" then
+        -- Set at an inn: you're standing next to it.
+        C_Timer.After(0.5, function() pcall(D.RecordBind) end)
     elseif event == "UPDATE_MOUSEOVER_UNIT" or event == "PLAYER_TARGET_CHANGED" then
         pcall(learnCreature, event == "UPDATE_MOUSEOVER_UNIT" and "mouseover" or "target")
     elseif event:find("^TRADE_SKILL") or event:find("^CRAFT") then
@@ -3840,6 +3980,7 @@ local function help()
     say("  /askbot upgrades    /askbot upgrades legs    /askbot what gear should I get as a feral druid")
     say("  /askbot is [item] an upgrade    /askbot target")
     say("  /askbot recipe for Linen Bag    /askbot mats for 5 Linen Bag    /askbot how do I level tailoring")
+    say("  /askbot show all skinning trainers    /askbot hearth    /askbot again    /askbot history")
     say("  /askbot where is my party    /askbot where is <name>")
     say("Click " .. "|cff71d5ff[pin]|r" .. " on any answer to put a pin on it.")
     say("/askbot clear - remove the pin.  /askbot status - index info.  Also /ab and /ask.")
@@ -4003,6 +4144,20 @@ local function onSlash(msg, editBox)
                 say("  " .. unit .. ": " .. tostring(UnitName(unit)) .. " (GUID " .. tostring(UnitGUID and UnitGUID(unit)) .. ")")
             end
         end
+    elseif cmd == "again" or cmd == "repeat" or cmd == "last" then
+        local h = AskBotCharDB and AskBotCharDB.history
+        if not h or not h[1] then return say("Nothing to ask again yet.") end
+        say(GREY .. "Again: " .. h[1] .. "|r")
+        AskBot.Ask(h[1])
+    elseif cmd == "history" or cmd == "recent" then
+        local h = AskBotCharDB and AskBotCharDB.history or {}
+        if not h[1] then return say("No questions yet.") end
+        local parts = {}
+        for i = 1, math.min(10, #h) do
+            local question = h[i]
+            parts[#parts + 1] = makeLink(question, function() AskBot.Ask(question) end)
+        end
+        say("Recent questions: " .. table.concat(parts, " "))
     elseif cmd:match("^debug skills") then
         say("Skill APIs: GetSkillLineInfo " .. (GetSkillLineInfo and "yes" or "no") .. ", GetProfessions "
             .. (GetProfessions and "yes" or "no") .. ", GetTradeSkillLine " .. (GetTradeSkillLine and "yes" or "no")
@@ -4028,6 +4183,13 @@ local function onSlash(msg, editBox)
         if D.status ~= "ready" then return say("Still loading, try again in a moment.") end
         debugQuest(msg:sub(12))
     else
+        -- Remember it for /ab again and /ab history (newest first, no repeats).
+        AskBotCharDB = AskBotCharDB or {}
+        local h = AskBotCharDB.history or {}
+        for i = #h, 1, -1 do if h[i]:lower() == msg:lower() then table.remove(h, i) end end
+        table.insert(h, 1, msg)
+        while #h > 15 do table.remove(h) end
+        AskBotCharDB.history = h
         AskBot.Ask(msg)
     end
 end
@@ -4054,6 +4216,7 @@ function AskBot.IsPersonalQuestion(question)
     local q = normalize(question)
     if gearQuestion(q) then return true end
     if personalProfession(q) then return true end
+    if HEARTH_QUESTIONS[q] then return true end
     if question:find("|Hitem:") then
         local rest = normalize((question:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|H.-|h.-|h", " "):gsub("|r", "")))
         if asksUpgrade(rest) then return true end

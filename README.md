@@ -127,9 +127,13 @@ Jannok Breezesong - Teldrassil 56.0, 60.0 (~10 min, fly Westfall > Stormwind Cit
 
 Open any flight master's map once and AskBot learns which flight paths your character knows, so it only plans routes you can actually take.
 
+**Your hearthstone counts too.** Use it once (or set it at an inn) and AskBot learns where it goes. While it's off cooldown, any answer where hearthing saves a minute or more says so: *(~1 min, hearth to Auberdine)*. `/ab hearth` shows where it's set and when it's ready.
+
 ## Waypoints
 
 Every answer has a **[pin]** link. The best answer is pinned automatically (you can turn that off), and you can click any other one. With **TomTom** installed you get its arrow; without it, AskBot uses the game's own map pin. `/ab clear` removes the pin.
+
+**Everything at once:** put `show all` in front of a question (`/ab show all skinning trainers`, `/ab show all Copper Vein`, `/ab show all rares`) to put an icon on your world map and minimap for every place it finds, up to 200. Hover an icon for its name, click it to pin it; `/ab clear` removes them all.
 
 ## Let friends ask too
 
@@ -172,7 +176,10 @@ Thor <Gryphon Master> - Westfall 56.6, 52.6 (71 yds, <1 min)
 |---|---|
 | `/askbot <question>` (also `/ab`, `/ask`) | Ask a question |
 | `/ab help` | Example questions |
-| `/ab clear` | Remove the waypoint |
+| `/ab clear` | Remove the waypoint and any "show all" map icons |
+| `/ab again` | Ask your last question again |
+| `/ab history` | Your recent questions, as links |
+| `/ab hearth` | Where your hearthstone goes and when it's ready |
 | `/ab status` | What AskBot has loaded |
 | `/ab forget flights` | Forget learned flight paths |
 | `/ab refresh prices` | Re-check the prices you've asked about (needs Auctionator) |

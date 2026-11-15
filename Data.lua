@@ -727,11 +727,60 @@ local function reachDocks(ctx, origin, graph)
     return cost, steps
 end
 
+--------------------------------------------------------------------------------------------
+-- Hearthstone: where it goes (learned when you use it or set it) and its cooldown
+--------------------------------------------------------------------------------------------
+
+local HEARTHSTONE = 6948
+D.HEARTH_TIME = 25 -- seconds: the 10 second cast plus arriving
+
+--- Remember where your hearthstone goes: where you are now (call just after arriving by
+--- hearthstone, or when setting it at an inn).
+function D.RecordBind()
+    local px, py, pinst = HBD:GetPlayerWorldPosition()
+    if not px then return false end
+    local mapId = C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
+    local pos = mapId and C_Map.GetPlayerMapPosition and C_Map.GetPlayerMapPosition(mapId, "player")
+    local x, y
+    if pos then
+        if pos.GetXY then x, y = pos:GetXY() else x, y = pos.x, pos.y end
+    end
+    if (not x) and mapId then x, y = HBD:GetZoneCoordinatesFromWorld(px, py, mapId) end
+    AskBotCharDB = AskBotCharDB or {}
+    AskBotCharDB.bind = { name = GetBindLocation and GetBindLocation() or "?", uiMapId = mapId,
+        x = x and x * 100, y = y and y * 100, wx = px, wy = py, inst = pinst }
+    return true
+end
+
+--- Your hearthstone: { name, uiMapId, x, y, wx, wy, inst, remaining (seconds of cooldown) },
+--- or nil (no hearthstone, never seen where it goes, set somewhere new, or answering someone
+--- else). `known` is false when the bind location's name is known but not its position.
+function D.Hearth()
+    if AskBot.asker or D.originOverride ~= nil then return nil end
+    local count = ((C_Item and C_Item.GetItemCount) or GetItemCount)
+    if not count or (count(HEARTHSTONE) or 0) == 0 then return nil end
+    local bind = AskBotCharDB and AskBotCharDB.bind
+    local current = GetBindLocation and GetBindLocation()
+    if not bind or not bind.wx or (current and bind.name ~= current) then return nil, false, current end
+    local cd = (C_Container and C_Container.GetItemCooldown) or GetItemCooldown
+    local remaining = 0
+    if cd then
+        local start, duration = cd(HEARTHSTONE)
+        if start and start > 0 and duration and duration > 0 then
+            remaining = math.max(0, start + duration - GetTime())
+        end
+    end
+    return { name = bind.name, uiMapId = bind.uiMapId, x = bind.x, y = bind.y, wx = bind.wx, wy = bind.wy,
+        inst = bind.inst, remaining = remaining }, true, current
+end
+
 --- "fly Westfall > Stormwind City, boat Stormwind Harbor > Auberdine"
 function D.RouteText(steps)
     local parts = {}
     for _, s in ipairs(steps or {}) do
-        if s.kind == "fly" then
+        if s.kind == "hearth" then
+            parts[#parts + 1] = "hearth to " .. s.name
+        elseif s.kind == "fly" then
             parts[#parts + 1] = "fly " .. D.ZoneName(s.from.uiMapId) .. " > " .. D.ZoneName(s.to.uiMapId)
         else
             parts[#parts + 1] = s.kind .. " " .. s.from.name .. " > " .. s.to.name
@@ -745,6 +794,9 @@ end
 --- Each result: { place, spawn, dist (yards, same continent only), time (seconds), steps }.
 --- Also returns whether a starting position was known.
 function D.Rank(places, origin)
+    -- Your hearthstone counts only for your own position (not a given origin or an asker's).
+    local hearth = (not origin) and D.Hearth()
+    if hearth and hearth.remaining > 0 then hearth = nil end
     if not origin then
         if D.originOverride ~= nil then
             -- Answering someone else: their position, or false when it isn't known.
@@ -767,15 +819,23 @@ function D.Rank(places, origin)
         return m[1], m[2]
     end
 
-    local dockCost, dockSteps
-    local function docks()
-        if not dockCost then dockCost, dockSteps = reachDocks(ctx, origin, transportGraph(D.PlayerFaction())) end
-        return dockCost, dockSteps
+    local dockMemo = {}
+    local function docksFrom(o)
+        local m = dockMemo[o]
+        if not m then
+            local c, s = reachDocks(ctx, o, transportGraph(D.PlayerFaction()))
+            m = { c, s }
+            dockMemo[o] = m
+        end
+        return m[1], m[2]
     end
 
-    local results = {}
-    for _, place in ipairs(places) do
+    local hearthOrigin = hearth and { x = hearth.wx, y = hearth.wy, inst = hearth.inst }
+
+    local function bestFrom(place, o)
         local best
+        local function docks() return docksFrom(o) end
+        local origin = o
         if origin then
             -- Same continent: the nearest spawn in a straight line, walking or flying.
             local spawn, dist
@@ -809,6 +869,22 @@ function D.Rank(places, origin)
                     best = { place = place, spawn = bestSpawn, time = cost[bestDock] + (t or 0),
                         steps = withStep(steps[bestDock], step) }
                 end
+            end
+        end
+        return best
+    end
+
+    local results = {}
+    for _, place in ipairs(places) do
+        local best = bestFrom(place, origin)
+        -- Hearthing then travelling, when that saves a minute or more.
+        if hearthOrigin and best and best.time then
+            local viaHearth = bestFrom(place, hearthOrigin)
+            if viaHearth and viaHearth.time and viaHearth.time + D.HEARTH_TIME < best.time - 60 then
+                viaHearth.time = viaHearth.time + D.HEARTH_TIME
+                viaHearth.dist = nil
+                table.insert(viaHearth.steps, 1, { kind = "hearth", name = hearth.name })
+                best = viaHearth
             end
         end
         if not best and place.spawns[1] then best = { place = place, spawn = place.spawns[1] } end

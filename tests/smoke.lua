@@ -17,9 +17,13 @@ function CreateFrame()
         if event == "TRADE_SKILL_UPDATE" then error("Attempt to register unknown event \"" .. event .. "\"") end
     end
     function f:SetScript(k, fn) self.scripts[k] = fn end
+    function f:SetSize() end
+    function f:Hide() end
+    function f:CreateTexture() return { SetAllPoints = function() end, SetTexture = function() end } end
     frames[#frames + 1] = f
     return f
 end
+UIParent = {}
 -- Fake clock: timers run when the test calls advance(seconds).
 local now, timers = 0, {}
 local function newTimer(sec, fn)
@@ -112,6 +116,12 @@ local hbd = {
     GetUnitWorldPosition = function(_, u) local d = units[u]; if d then return d[5], d[6], 0 end end,
     mapData = maps,
     GetWorldDistance = function(_, _, x1, y1, x2, y2) return math.sqrt((x1 - x2) ^ 2 + (y1 - y2) ^ 2) end,
+    -- HereBeDragons-Pins (LibStub returns this one object for every library)
+    worldIcons = 0,
+    AddWorldMapIconMap = function(self) self.worldIcons = self.worldIcons + 1 end,
+    AddMinimapIconMap = function() end,
+    RemoveAllWorldMapIcons = function(self) self.worldIcons = 0 end,
+    RemoveAllMinimapIcons = function() end,
 }
 LibStub = function() return hbd end
 
@@ -1019,6 +1029,39 @@ do
     advance(3)
     if #output >= from then failures = failures + 1; print("   !! FAIL: rare alert repeated") end
     AskBot.SetOption("rareAlerts", false)
+end
+
+-- Travel and map ---------------------------------------------------------------------------
+-- History: /ab again and /ab history
+ask("closest inn", "Innkeeper Heather")
+ask("again", { "Again: closest inn", "Innkeeper Heather" })
+ask("history", { "Recent questions: ", "[closest inn]" }, { "[again]" })
+-- Every skinning trainer on the map
+ask("show all skinning trainers", { "Nearest Skinning trainer", "Put 2 icons on your map" })
+if hbd.worldIcons ~= 2 then failures = failures + 1; print("   !! FAIL: world icons " .. hbd.worldIcons) end
+ask("clear", "Pin cleared")
+if hbd.worldIcons ~= 0 then failures = failures + 1; print("   !! FAIL: icons not cleared") end
+ask("show all flying carpets", "Nothing to put on the map")
+
+-- Hearthstone: learned by using it (you arrive in Auberdine), then used for travel times
+do
+    local hearthCd = { 0, 0 }
+    function GetBindLocation() return "Auberdine" end
+    function GetItemCooldown() return hearthCd[1], hearthCd[2] end
+    bags[6948] = 1
+    ask("hearth", "Your hearthstone is set to |cffffd100Auberdine|r. Use it once")
+    local pos, best = hbd.GetPlayerWorldPosition, C_Map.GetBestMapForUnit
+    hbd.GetPlayerWorldPosition = function() return 3370, 440, 1 end           -- Darkshore 37, 44
+    C_Map.GetBestMapForUnit = function() return 1439 end
+    fire("UNIT_SPELLCAST_SUCCEEDED", "player", "cast-1", 8690)
+    advance(3)
+    hbd.GetPlayerWorldPosition, C_Map.GetBestMapForUnit = pos, best
+    ask("hearth", { "Hearthstone: |cffffd100Auberdine|r (Darkshore), |cff40ff40ready|r", "[pin]" })
+    ask("where is auberdine quester", "hearth to Auberdine", { "boat" })
+    hearthCd[1], hearthCd[2] = now, 3600                                        -- just used
+    ask("hearth", "ready in 60 min")
+    ask("where is auberdine quester", "boat", { "hearth to" })
+    bags[6948], AskBotCharDB.bind, GetBindLocation, GetItemCooldown = nil, nil, nil, nil
 end
 
 -- Settings and "!ask" from other players --------------------------------------------------
