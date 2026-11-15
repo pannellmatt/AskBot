@@ -2149,13 +2149,29 @@ AskBot.CheckRares = checkRares
 --- Your rank in a profession: a number, false if you don't have it, nil if unknown
 --- (answering someone else, or the skill API is missing).
 local function professionSkill(prof)
-    if AskBot.asker or not GetNumSkillLines or not GetSkillLineInfo then return nil end
-    for i = 1, GetNumSkillLines() do
-        local name, isHeader, _, rank = GetSkillLineInfo(i)
-        if name == prof and not isHeader then return rank end
+    if AskBot.asker then return nil end
+    if GetNumSkillLines and GetSkillLineInfo then
+        for i = 1, GetNumSkillLines() do
+            local name, isHeader, _, rank = GetSkillLineInfo(i)
+            if name == prof and not isHeader then return rank end
+        end
+        return false
     end
-    return false
+    -- Modern clients: GetProfessions() gives indexes for GetProfessionInfo().
+    if GetProfessions and GetProfessionInfo then
+        local list = { GetProfessions() }
+        for i = 1, 5 do
+            local index = list[i]
+            if index then
+                local name, _, rank = GetProfessionInfo(index)
+                if name == prof then return rank end
+            end
+        end
+        return false
+    end
+    return nil
 end
+AskBot.ProfessionSkill = professionSkill
 
 -- Vanilla gathering colours: orange until skill+25, yellow until +50, green until +100.
 local function skillColour(rank, req)
@@ -2288,6 +2304,410 @@ local function answerGatherBest(prof)
         heading = "I can't see your " .. prof .. " skill, so here are the starter nodes:"
     end
     answerGather(best, heading, true)
+end
+
+--------------------------------------------------------------------------------------------
+-- Professions: recipe sources, mats shopping lists, skill-up plans
+--------------------------------------------------------------------------------------------
+
+-- Words for each profession, and whether it's a crafting one (its recipes are recorded
+-- from the profession window).
+local PROFESSIONS = {
+    { "Tailoring", { "tailoring", "tailor" }, craft = true },
+    { "Leatherworking", { "leatherworking", "lw", "leatherwork" }, craft = true },
+    { "Blacksmithing", { "blacksmithing", "bs", "blacksmith" }, craft = true },
+    { "Alchemy", { "alchemy", "alch" }, craft = true },
+    { "Enchanting", { "enchanting", "ench", "enchant" }, craft = true },
+    { "Engineering", { "engineering", "engi", "eng" }, craft = true },
+    { "Cooking", { "cooking", "cook" }, craft = true },
+    { "First Aid", { "first aid", "firstaid" }, craft = true },
+    { "Mining", { "mining", "mine" } },
+    { "Herbalism", { "herbalism", "herb", "herbing" } },
+    { "Skinning", { "skinning", "skin" } },
+    { "Fishing", { "fishing", "fish" } },
+}
+local TRAINER_QUESTION = { Tailoring = "nearest tailoring trainer", Leatherworking = "nearest leatherworking trainer",
+    Blacksmithing = "nearest blacksmithing trainer", Alchemy = "nearest alchemy trainer",
+    Enchanting = "nearest enchanting trainer", Engineering = "nearest engineering trainer",
+    Cooking = "nearest cooking trainer", ["First Aid"] = "nearest first aid trainer",
+    Mining = "nearest mining trainer", Herbalism = "nearest herbalism trainer",
+    Skinning = "nearest skinning trainer", Fishing = "nearest fishing trainer" }
+
+local function professionNamed(text)
+    text = " " .. text .. " "
+    for _, p in ipairs(PROFESSIONS) do
+        for _, w in ipairs(p[2]) do
+            if text:find(" " .. w .. " ", 1, true) then return p[1], p.craft end
+        end
+    end
+end
+
+local function trainerLink(prof)
+    local question = TRAINER_QUESTION[prof]
+    return question and makeLink(prof .. " trainer", function() AskBot.Ask(question) end) or ""
+end
+
+--- Recorded recipes: AskBotCharDB.professions[prof] = { rank, max, recipes = { [key] = recipe } },
+--- recipe = { name, item (id or nil), made, diff ("optimal"|"medium"|"easy"|"trivial"),
+--- reagents = { { id, name, count } } }. Filled whenever a profession window opens.
+local function recordedProfessions()
+    return AskBotCharDB and AskBotCharDB.professions or {}
+end
+
+local function itemIdOf(link)
+    return link and tonumber(link:match("|Hitem:(%d+)"))
+end
+
+local DIFFICULTY = { [0] = "optimal", [1] = "medium", [2] = "easy", [3] = "trivial" }
+
+--- The modern profession API (C_TradeSkillUI): profession, rank, max, recipes; or nil.
+local function readModernRecipes()
+    local T = C_TradeSkillUI
+    if not (T and T.GetAllRecipeIDs and T.GetRecipeInfo) then return nil end
+    local info = (T.GetChildProfessionInfo and T.GetChildProfessionInfo())
+    if not (info and info.professionName and info.professionName ~= "") then
+        info = T.GetBaseProfessionInfo and T.GetBaseProfessionInfo()
+    end
+    local prof = info and (info.parentProfessionName or info.professionName)
+    if not prof or prof == "" then
+        if T.GetTradeSkillLine then prof = T.GetTradeSkillLine() end
+        if not prof then return nil end
+    end
+    local recipes = {}
+    for _, rid in ipairs(T.GetAllRecipeIDs() or {}) do
+        local ri = T.GetRecipeInfo(rid)
+        if ri and ri.learned and ri.name then
+            local r = { name = ri.name, diff = DIFFICULTY[ri.relativeDifficulty] or "easy", reagents = {} }
+            local schematic = T.GetRecipeSchematic and T.GetRecipeSchematic(rid, false)
+            if schematic then
+                r.item = schematic.outputItemID
+                r.made = schematic.quantityMin
+                for _, slot in ipairs(schematic.reagentSlotSchematics or {}) do
+                    local reagent = slot.reagents and slot.reagents[1]
+                    local id = reagent and reagent.itemID
+                    if id then
+                        local name = C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(id)
+                        r.reagents[#r.reagents + 1] = { id = id, name = name, count = slot.quantityRequired or 1 }
+                    end
+                end
+            end
+            recipes[D.NameKey(ri.name)] = r
+        end
+    end
+    return prof, info and info.skillLevel, info and info.maxSkillLevel, recipes
+end
+
+local function recordRecipes(kind)
+    local api
+    if kind == "craft" then
+        api = { line = GetCraftDisplaySkillLine, num = GetNumCrafts, info = GetCraftInfo, link = GetCraftItemLink,
+            nReag = GetCraftNumReagents, reag = GetCraftReagentInfo, reagLink = GetCraftReagentItemLink }
+    else
+        api = { line = GetTradeSkillLine, num = GetNumTradeSkills, info = GetTradeSkillInfo, link = GetTradeSkillItemLink,
+            nReag = GetTradeSkillNumReagents, reag = GetTradeSkillReagentInfo, reagLink = GetTradeSkillReagentItemLink,
+            made = GetTradeSkillNumMade }
+    end
+    local prof, rank, max
+    local recipes = {}
+    if api.line and api.num and api.info then
+        prof, rank, max = api.line()
+    elseif kind ~= "craft" then
+        prof, rank, max, recipes = readModernRecipes()
+        recipes = recipes or {}
+    end
+    if not prof or prof == "UNKNOWN" then return end
+    for i = 1, (api.line and api.num and api.info and api.num()) or 0 do
+        local name, kindOrSub, diffOrNil = api.info(i)
+        -- Trade skills: name, type. Crafts (enchanting): name, subSpellName, type.
+        local diff = (kind == "craft") and diffOrNil or kindOrSub
+        if name and diff and diff ~= "header" and diff ~= "subheader" then
+            local r = { name = name, diff = diff, reagents = {} }
+            r.item = api.link and itemIdOf(api.link(i))
+            if api.made then r.made = api.made(i) end
+            for j = 1, (api.nReag and api.nReag(i)) or 0 do
+                local rName, _, count = api.reag(i, j)
+                local id = api.reagLink and itemIdOf(api.reagLink(i, j))
+                if rName or id then r.reagents[#r.reagents + 1] = { id = id, name = rName, count = count or 1 } end
+            end
+            recipes[D.NameKey(name)] = r
+        end
+    end
+    if not next(recipes) then return end
+    AskBotCharDB = AskBotCharDB or {}
+    AskBotCharDB.professions = AskBotCharDB.professions or {}
+    -- Merge: collapsed categories and filters hide recipes, and recipes are never unlearned.
+    local old = AskBotCharDB.professions[prof]
+    if old then for k, r in pairs(old.recipes or {}) do if not recipes[k] then recipes[k] = r end end end
+    AskBotCharDB.professions[prof] = { rank = rank, max = max, recipes = recipes, seen = time and time() or 0 }
+end
+AskBot.RecordRecipes = recordRecipes
+
+--- A recipe you know by (crafted) name: recipe, profession.
+local function knownRecipe(name)
+    local key = D.NameKey(name)
+    for prof, p in pairs(recordedProfessions()) do
+        if p.recipes[key] then return p.recipes[key], prof end
+    end
+    for prof, p in pairs(recordedProfessions()) do
+        for k, r in pairs(p.recipes) do
+            if k:find(key, 1, true) then return r, prof end
+        end
+    end
+end
+
+--- Price of one reagent: copper, and where ("AH" / "vendor"), or nil.
+local function reagentPrice(id)
+    local P = AskBot.Prices
+    if not id then return nil end
+    local vendor = ItemDB.vendors and ItemDB.vendors(id)
+    local vb = P and P.VendorBuy and P.VendorBuy(id)
+    if vendor and #vendor > 0 and vb then return vb, "vendor" end
+    local ah = P and P.Available() and P.Auction(id)
+    if ah then return ah, "AH" end
+    if vendor and #vendor > 0 then return nil, "vendor" end
+end
+
+local function bagCount(id)
+    if not id then return 0 end
+    local f = (C_Item and C_Item.GetItemCount) or GetItemCount
+    return f and f(id, true) or 0
+end
+
+--- Mats for `count` crafts: lines with what you have and what to buy, and the cost.
+local function answerMats(recipe, prof, count)
+    count = math.max(1, count or 1)
+    local made = recipe.made or 1
+    local itemText = recipe.item and itemLinkText(recipe.item) or (GOLD .. recipe.name .. "|r")
+    say(itemText .. (count > 1 and (" x" .. count) or "") .. " (" .. prof .. "):"
+        .. (made > 1 and (GREY .. " makes " .. made * count .. "|r") or ""))
+    local total, unknown, haveAll = 0, false, true
+    for _, r in ipairs(recipe.reagents) do
+        local need = r.count * count
+        local have = bagCount(r.id)
+        local buy = math.max(0, need - have)
+        local name = r.id and itemLinkText(r.id) or r.name or "?"
+        local line = "  " .. need .. " " .. name .. ": "
+        if buy == 0 then
+            line = line .. "|cff40ff40have " .. have .. "|r"
+        else
+            haveAll = false
+            local price, where = reagentPrice(r.id)
+            line = line .. (have > 0 and ("have " .. have .. ", ") or "") .. "buy " .. buy
+            if price then
+                total = total + price * buy
+                line = line .. GREY .. " (" .. where .. " " .. AskBot.Prices.Format(price) .. " each)|r"
+            elseif where == "vendor" then
+                line = line .. GREY .. " (vendors)|r"; unknown = true
+            else
+                unknown = true
+            end
+        end
+        say(line)
+    end
+    if haveAll then return say("  You have everything for " .. count .. ".") end
+    local summary = "  To buy: " .. (total > 0 and AskBot.Prices.Format(total) or "?") .. (unknown and total > 0 and "+" or "")
+    local P = AskBot.Prices
+    local sells = recipe.item and P.Available() and P.Auction(recipe.item)
+    if sells and total > 0 and not unknown then
+        local fullCost = 0
+        for _, r in ipairs(recipe.reagents) do fullCost = fullCost + (reagentPrice(r.id) or 0) * r.count end
+        local perItem = fullCost / made
+        summary = summary .. ". On the AH it sells for " .. P.Format(sells) .. " each, "
+            .. (sells > perItem and ("so crafting saves " .. P.Format(math.floor(sells - perItem)) .. " each")
+                or ("so buying it is " .. P.Format(math.floor(perItem - sells)) .. " cheaper each"))
+    end
+    say(summary .. ".")
+end
+
+--- Where to get the recipe for `name`: recipe item sources, or the trainer.
+local function answerRecipe(name)
+    local known, prof
+    if not AskBot.asker then known, prof = knownRecipe(name) end
+    if known then
+        say("You already know " .. (known.item and itemLinkText(known.item) or (GOLD .. known.name .. "|r")) .. " (" .. prof .. "). "
+            .. makeLink("mats", function() answerMats(known, prof, 1) end))
+        return
+    end
+    local key = D.NameKey(name)
+    local hits = {}
+    for _, e in ipairs(D.recipeItems) do
+        if e[1] == key then hits[#hits + 1] = { nil, e[2], e[3] } end
+    end
+    if #hits == 0 then
+        for _, e in ipairs(D.recipeItems) do
+            if e[1]:find(key, 1, true) and #hits < 3 then hits[#hits + 1] = { nil, e[2], e[3] } end
+        end
+    end
+    if #hits > 0 then
+        answerItem(nil, "get", { hits[1] })
+        if #hits > 1 then
+            local more = {}
+            for i = 2, #hits do
+                local h = hits[i]
+                more[#more + 1] = makeLink(h[3], function() answerItem(nil, "get", { h }) end)
+            end
+            say(GREY .. "  Also: |r" .. table.concat(more, ", "))
+        end
+        return
+    end
+    -- No recipe item: a trainer teaches it (if it's craftable at all).
+    local mine = {}
+    for _, p in ipairs(PROFESSIONS) do
+        if p.craft and (professionSkill(p[1]) or recordedProfessions()[p[1]]) then mine[#mine + 1] = trainerLink(p[1]) end
+    end
+    say("No pattern, plan or recipe item teaches \"" .. name .. "\", so if it's craftable a trainer teaches it."
+        .. (#mine > 0 and (" " .. table.concat(mine, " ")) or ""))
+end
+
+-- Skinning: skill needed for a mob of `level` (vanilla).
+local function skinLevelFor(skill)
+    if skill < 100 then return 10 + math.floor(skill / 10) end
+    return math.floor(skill / 5)
+end
+
+local DIFF_LABEL = { optimal = "|cffff8040orange|r", medium = "|cffffff00yellow|r", easy = "|cff40c040green|r" }
+
+--- How to level a profession.
+local function answerSkillUp(prof)
+    if prof == "Mining" or prof == "Herbalism" then return answerGatherBest(prof) end
+    local rank = professionSkill(prof)
+    if prof == "Skinning" then
+        if rank == false then return say("You don't have Skinning. " .. trainerLink(prof)) end
+        if not rank then
+            return say("I can't read your Skinning skill here. You can skin beasts up to level 10 + skill/10 (skill/5 from"
+                .. " 100), so skill 50 skins level 15 and 150 skins level 30; the highest you can skin give the most skill-ups.")
+        end
+        local top = skinLevelFor(rank)
+        say("Skinning " .. rank .. ": you can skin beasts up to level " .. top .. "; the closest to that give the most skill-ups. "
+            .. makeLink("zones for level " .. top, function() AskBot.Ask("where should i go at " .. top) end))
+        return
+    end
+    if prof == "Fishing" then
+        if rank == false then return say("You don't have Fishing. " .. trainerLink(prof)) end
+        return say("Fishing " .. (rank or "?") .. ": every catch can give a skill-up; fish where the zone's fish don't get away. "
+            .. trainerLink(prof))
+    end
+    local p = recordedProfessions()[prof]
+    if not p then
+        if rank == false then return say("You don't have " .. prof .. ". " .. trainerLink(prof)) end
+        return say("Open your " .. prof .. " window once so I can read your recipes, then ask again.")
+    end
+    rank = rank or p.rank
+    local list = {}
+    for _, r in pairs(p.recipes) do
+        if r.diff == "optimal" or r.diff == "medium" then
+            local cost, unknown = 0, false
+            for _, g in ipairs(r.reagents) do
+                local price = reagentPrice(g.id)
+                local short = math.max(0, g.count - bagCount(g.id))
+                if short > 0 then
+                    if price then cost = cost + price * short else unknown = true end
+                end
+            end
+            list[#list + 1] = { r = r, cost = cost, unknown = unknown }
+        end
+    end
+    table.sort(list, function(a, b)
+        if a.r.diff ~= b.r.diff then return a.r.diff == "optimal" end
+        if a.unknown ~= b.unknown then return not a.unknown end
+        if a.cost ~= b.cost then return a.cost < b.cost end
+        return a.r.name < b.r.name
+    end)
+    local atCap = p.max and rank and rank >= p.max
+    say(prof .. " " .. (rank or "?") .. (p.max and ("/" .. p.max) or "") .. ": cheapest skill-ups"
+        .. (atCap and (" |cffff8040(at your cap: train the next rank)|r " .. trainerLink(prof)) or "") .. ":")
+    if #list == 0 then
+        return say(GREY .. "  Nothing orange or yellow. Learn new recipes: |r" .. trainerLink(prof))
+    end
+    for i = 1, math.min(4, #list) do
+        local e = list[i]
+        local r = e.r
+        local cost = e.cost == 0 and not e.unknown and "|cff40ff40mats in bags|r"
+            or ("mats " .. (e.cost > 0 and AskBot.Prices.Format(e.cost) or "?") .. (e.unknown and e.cost > 0 and "+" or ""))
+        say("  " .. (r.item and itemLinkText(r.item) or (GOLD .. r.name .. "|r")) .. " " .. DIFF_LABEL[r.diff] .. " - " .. cost
+            .. " " .. makeLink("list", function() answerMats(r, prof, 1) end))
+    end
+    if p.seen and time and time() - p.seen > 3 * 86400 then
+        say(GREY .. "  (From when you last opened your " .. prof .. " window.)|r")
+    end
+end
+
+-- "mats for 3 linen bag", "what do I need to make Linen Bag", "recipe for X", "how do I level tailoring"
+local MATS_PATTERNS = { "^mats for (.+)$", "^materials for (.+)$", "^reagents for (.+)$", "^what do i need to make (.+)$",
+    "^what does it take to make (.+)$", "^shopping list for (.+)$", "^how much to make (.+)$", "^cost to make (.+)$",
+    "^cost of making (.+)$", "^(.+) mats$", "^(.+) materials$", "^how do i make (.+)$", "^how to make (.+)$",
+    "^can i make (.+)$" }
+local RECIPE_PATTERNS = { "^recipe for (.+)$", "^pattern for (.+)$", "^plans for (.+)$", "^formula for (.+)$",
+    "^schematic for (.+)$", "^where do i get the recipe for (.+)$", "^where do i get the pattern for (.+)$",
+    "^where do i get the plans for (.+)$", "^where do i get the formula for (.+)$", "^where do i get the schematic for (.+)$",
+    "^where can i get the recipe for (.+)$", "^where can i learn (.+)$", "^how do i learn (.+)$", "^where do i learn (.+)$",
+    "^who teaches (.+)$", "^where is the recipe for (.+)$" }
+local SKILLUP_PATTERNS = { "^how do i level (.+)$", "^how to level (.+)$", "^how should i level (.+)$", "^level up (.+)$",
+    "^levelling (.+)$", "^leveling (.+)$", "^skill up (.+)$", "^(.+) skill ?ups?$", "^(.+) skill up plan$",
+    "^(.+) levelling$", "^(.+) leveling$", "^(.+) guide$", "^best (.+) skill ?ups$", "^what (.+) should i craft$",
+    "^what should i craft for (.+)$" }
+
+--- Is `q` a profession question that needs your own recipes or skills? (For "!ask".)
+local function personalProfession(q)
+    for _, list in ipairs({ MATS_PATTERNS, SKILLUP_PATTERNS }) do
+        for _, pattern in ipairs(list) do
+            local s = q:match(pattern)
+            if s and (list == MATS_PATTERNS or professionNamed(s)) then return true end
+        end
+    end
+    return q == "what should i craft"
+end
+
+--- Answers profession questions; returns true if it did.
+local function professionQuestion(q, isServiceQuestion)
+    -- Skill-ups need a profession named.
+    for _, pattern in ipairs(SKILLUP_PATTERNS) do
+        local s = q:match(pattern)
+        local prof = s and professionNamed(s)
+        if prof then answerSkillUp(prof); return true end
+    end
+    if q == "what should i craft" then
+        local any
+        for prof in pairs(recordedProfessions()) do any = true; answerSkillUp(prof) end
+        if not any then say("Open a profession window once so I can read your recipes, then ask again.") end
+        return true
+    end
+    for _, pattern in ipairs(MATS_PATTERNS) do
+        local s = q:match(pattern)
+        if s and not professionNamed(s) then
+            local count = tonumber(s:match("^(%d+) ")) or tonumber(s:match(" x ?(%d+)$")) or tonumber(s:match(" (%d+)$"))
+            s = s:gsub("^%d+ ", ""):gsub(" x ?%d+$", ""):gsub(" %d+$", ""):gsub("^an? ", ""):gsub("^the ", "")
+            local recipe, prof
+            if not AskBot.asker then recipe, prof = knownRecipe(s) end
+            if recipe then answerMats(recipe, prof, count); return true end
+            -- Not one of yours: where to learn it (or how to let AskBot read your recipes).
+            local isRecipe = false
+            local key = D.NameKey(s)
+            for _, e in ipairs(D.recipeItems) do if e[1] == key then isRecipe = true; break end end
+            if isRecipe then
+                if not next(recordedProfessions()) then
+                    say(GREY .. "I haven't seen your recipes yet: open your profession window once.|r")
+                end
+                say("You don't know how to make that yet.")
+                answerRecipe(s)
+                return true
+            end
+            if pattern ~= "^how do i make (.+)$" and pattern ~= "^how to make (.+)$" and pattern ~= "^can i make (.+)$" then
+                say(next(recordedProfessions()) and ("None of your recipes makes \"" .. s .. "\".")
+                    or "Open your profession window once so I can read your recipes, then ask again.")
+                return true
+            end
+        end
+    end
+    for _, pattern in ipairs(RECIPE_PATTERNS) do
+        local s = q:match(pattern)
+        if s and not professionNamed(s) and not isServiceQuestion() then
+            s = s:gsub("^an? ", ""):gsub("^the ", "")
+            answerRecipe(s)
+            return true
+        end
+    end
+    return false
 end
 
 --------------------------------------------------------------------------------------------
@@ -2945,6 +3365,9 @@ local function answer(question)
         if intent == "after" then return answerAfter(nil, tonumber(questId)) end
         return answerQuest(nil, intent == "questEnd" and "end" or intent == "questStart" and "start" or "auto", { tonumber(questId) })
     end
+    -- Professions: "mats for Linen Bag", "recipe for X", "how do I level tailoring"
+    if professionQuestion(q, function() return findTarget(q) ~= nil end) then return end
+
     if itemId then
         local id = tonumber(itemId)
         local hits = { { nil, id, itemName(id) } }
@@ -3175,6 +3598,14 @@ events:RegisterEvent("PLAYER_LOGIN")
 events:RegisterEvent("TAXIMAP_OPENED")
 events:RegisterEvent("AUCTION_HOUSE_SHOW")
 events:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+-- Profession window events differ between clients (classic trade skills and crafts, or the
+-- modern C_TradeSkillUI); registering one the client lacks is an error, so try each.
+for _, event in ipairs({ "TRADE_SKILL_SHOW", "TRADE_SKILL_UPDATE", "TRADE_SKILL_LIST_UPDATE",
+    "TRADE_SKILL_DATA_SOURCE_CHANGED", "CRAFT_SHOW", "CRAFT_UPDATE" }) do
+    local valid = not (C_EventUtils and C_EventUtils.IsEventValid) or C_EventUtils.IsEventValid(event)
+    if valid then pcall(events.RegisterEvent, events, event) end
+end
+local recordTimer
 events:SetScript("OnEvent", function(_, event)
     if event == "PLAYER_LOGIN" then
         AskBotCharDB = AskBotCharDB or {}
@@ -3185,6 +3616,14 @@ events:SetScript("OnEvent", function(_, event)
         if ok and learned and learned > 0 then
             say("Learned " .. learned .. " flight path" .. (learned == 1 and "" or "s") .. " for route planning.")
         end
+    elseif event:find("^TRADE_SKILL") or event:find("^CRAFT") then
+        -- The window fires many updates; read it once things settle.
+        local kind = event:find("^CRAFT") and "craft" or "trade"
+        if recordTimer then recordTimer:Cancel() end
+        recordTimer = C_Timer.NewTimer(0.5, function()
+            local ok, err = pcall(recordRecipes, kind)
+            if not ok and geterrorhandler then geterrorhandler()(err) end
+        end)
     elseif event == "ZONE_CHANGED_NEW_AREA" then
         -- Let the map settle before asking which zone this is.
         C_Timer.After(3, function()
@@ -3218,6 +3657,7 @@ local function help()
     say("  /askbot where can I mine copper    /askbot Peacebloom    /askbot where should I mine")
     say("  /askbot upgrades    /askbot upgrades legs    /askbot what gear should I get as a feral druid")
     say("  /askbot is [item] an upgrade    /askbot target")
+    say("  /askbot recipe for Linen Bag    /askbot mats for 5 Linen Bag    /askbot how do I level tailoring")
     say("  /askbot where is my party    /askbot where is <name>")
     say("Click " .. "|cff71d5ff[pin]|r" .. " on any answer to put a pin on it.")
     say("/askbot clear - remove the pin.  /askbot status - index info.  Also /ab and /ask.")
@@ -3381,6 +3821,24 @@ local function onSlash(msg, editBox)
                 say("  " .. unit .. ": " .. tostring(UnitName(unit)) .. " (GUID " .. tostring(UnitGUID and UnitGUID(unit)) .. ")")
             end
         end
+    elseif cmd:match("^debug skills") then
+        say("Skill APIs: GetSkillLineInfo " .. (GetSkillLineInfo and "yes" or "no") .. ", GetProfessions "
+            .. (GetProfessions and "yes" or "no") .. ", GetTradeSkillLine " .. (GetTradeSkillLine and "yes" or "no")
+            .. ", C_TradeSkillUI " .. (C_TradeSkillUI and "yes" or "no") .. ", GetCraftInfo " .. (GetCraftInfo and "yes" or "no") .. ".")
+        local found = {}
+        for _, p in ipairs({ "Tailoring", "Leatherworking", "Blacksmithing", "Alchemy", "Enchanting", "Engineering",
+            "Cooking", "First Aid", "Mining", "Herbalism", "Skinning", "Fishing" }) do
+            local r = professionSkill(p)
+            if r ~= false then found[#found + 1] = p .. " " .. tostring(r) end
+        end
+        say("  Skills seen: " .. (#found > 0 and table.concat(found, ", ") or "none"))
+        local rec = {}
+        for prof, p in pairs(AskBotCharDB and AskBotCharDB.professions or {}) do
+            local n = 0
+            for _ in pairs(p.recipes or {}) do n = n + 1 end
+            rec[#rec + 1] = prof .. " " .. tostring(p.rank) .. "/" .. tostring(p.max) .. " (" .. n .. " recipes)"
+        end
+        say("  Recipes read: " .. (#rec > 0 and table.concat(rec, ", ") or "none yet (open a profession window)"))
     elseif cmd:match("^debug item") then
         if D.status ~= "ready" then return say("Still loading, try again in a moment.") end
         debugItem(msg:sub(11))
@@ -3413,6 +3871,7 @@ end
 function AskBot.IsPersonalQuestion(question)
     local q = normalize(question)
     if gearQuestion(q) then return true end
+    if personalProfession(q) then return true end
     if question:find("|Hitem:") then
         local rest = normalize((question:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|H.-|h.-|h", " "):gsub("|r", "")))
         if asksUpgrade(rest) then return true end

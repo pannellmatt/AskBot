@@ -77,6 +77,13 @@ AskBot compares what you're wearing with gear you can get soon: rewards from que
 ### Mining, herbs and fishing schools
 The nearest node, the zones with the most nodes, and whether your skill is high enough (coloured like the game's skill-up colours).
 
+### Professions
+Open each profession window once so AskBot can read your recipes; it keeps them up to date whenever you open it again.
+
+- `/ab recipe for Linen Bag` (or `how do I learn …`, `pattern for …`, `where do I get the plans for …`): where to get the pattern, plan, formula or recipe: vendors, drops and quests, with pins. If no recipe item teaches it, a trainer does.
+- `/ab mats for 5 Linen Bag` (or `what do I need to make …`, `shopping list for …`): each reagent with how many you have and how many to buy, vendor or AH prices *(with Auctionator)*, the total, and whether crafting beats buying the item.
+- `/ab how do I level tailoring` (or `tailoring skill ups`, `what should I craft`): your orange and yellow recipes, cheapest mats first, and a nudge to the trainer at your skill cap. Mining and herbalism suggest the best nodes for your skill; skinning says the highest level you can skin.
+
 - `/ab where can I mine copper` (or `/ab copper ore`, `/ab tin nodes`)
 - `/ab Peacebloom` (or `/ab where can I pick Kingsblood`)
 - `/ab where should I mine` / `/ab where should I level herbalism`: the best node for your current skill, and what opens up next.

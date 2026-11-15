@@ -12,7 +12,10 @@ end }
 local frames, tickerFn = {}, nil
 function CreateFrame()
     local f = { scripts = {} }
-    function f:RegisterEvent() end
+    -- Forever's client has no TRADE_SKILL_UPDATE (registering it errors in the game).
+    function f:RegisterEvent(event)
+        if event == "TRADE_SKILL_UPDATE" then error("Attempt to register unknown event \"" .. event .. "\"") end
+    end
     function f:SetScript(k, fn) self.scripts[k] = fn end
     frames[#frames + 1] = f
     return f
@@ -262,6 +265,7 @@ local items = {
     [9005] = { name = "Apprentice Wand", questRewards = { 112 } },
     [9020] = { name = "Grills' Girdle", npcDrops = { 20 } },               -- dropped by a rare in Westfall
     [9022] = { name = "Spell Ring" },
+    [5771] = { name = "Pattern: Red Linen Bag", vendors = { 12 } },          -- a recipe sold by the Thread Seller
     [9004] = { name = "Silver Ring" },
 }
 local objects = { [500] = { "Wanted Poster", { [W] = { { 53, 52 } } } }, [501] = { "Shrine of Remulos", { [W] = { { 20, 80 } } } },
@@ -446,7 +450,7 @@ AuctionFrame = { shown = false, IsShown = function(self) return self.shown end }
 Auctionator = { API = { v1 = {
     GetAuctionPriceByItemID = function(caller, id) assert(caller == "AskBot"); return ahPrices[id] end,
     GetAuctionAgeByItemID = function(_, id) return ahAges[id] end,
-    GetVendorPriceByItemID = function() return nil end,
+    GetVendorPriceByItemID = function(_, id) return ({ [2320] = 10 })[id] end,
     RegisterForDBUpdate = function(_, fn) dbUpdated = fn end,
     MultiSearchExact = function(_, names)
         if not AuctionFrame.shown then error("Auction house is not open") end
@@ -858,6 +862,85 @@ ask("debug item 9022", { "stats: none reported", "from Equip: lines: SP=7" })
 ask("is " .. link(9022) .. " an upgrade as healer", "not an upgrade for Arms Warrior")  -- no healer spec: talents decide
 -- "/ab target"
 ask("target", "Target something first")
+
+-- Professions -------------------------------------------------------------------------------
+-- Your Tailoring window (75/75): pants are orange, the bag yellow, bolts grey.
+for id, name in pairs({ [2996] = "Bolt of Linen Cloth", [4238] = "Linen Bag", [4343] = "Brown Linen Pants",
+    [2320] = "Coarse Thread" }) do
+    itemCache[id] = name
+end
+local function il(id) return "|cffffffff|Hitem:" .. id .. "::|h[" .. itemCache[id] .. "]|h|r" end
+local tradeSkills = {
+    { "Pants", "header" },
+    { "Brown Linen Pants", "optimal", 4343, { { 2996, 2 }, { 2320, 1 } } },
+    { "Linen Bag", "medium", 4238, { { 2996, 3 }, { 2320, 3 } } },
+    { "Bolt of Linen Cloth", "trivial", 2996, { { 2589, 2 } } },
+}
+function GetTradeSkillLine() return "Tailoring", 75, 75 end
+function GetNumTradeSkills() return #tradeSkills end
+function GetTradeSkillInfo(i) return tradeSkills[i][1], tradeSkills[i][2] end
+function GetTradeSkillItemLink(i) return tradeSkills[i][3] and il(tradeSkills[i][3]) end
+function GetTradeSkillNumMade() return 1, 1 end
+function GetTradeSkillNumReagents(i) return #(tradeSkills[i][4] or {}) end
+function GetTradeSkillReagentInfo(i, j) local r = tradeSkills[i][4][j]; return itemCache[r[1]], "icon", r[2], bags[r[1]] or 0 end
+function GetTradeSkillReagentItemLink(i, j) return il(tradeSkills[i][4][j][1]) end
+ahPrices[2996], ahAges[2996] = 400, 0
+ahPrices[4238], ahAges[4238] = 5000, 0
+bags[2996] = 1
+ask("mats for linen bag", "Open your profession window once")
+fire("TRADE_SKILL_SHOW")
+advance(1)
+ask("mats for 2 linen bag", { "[Linen Bag]|r x2 (Tailoring):", "  6 |cffffffff[Bolt of Linen Cloth]|r: have 1, buy 5",
+    "(AH 4s each)", "  6 |cffffffff[Coarse Thread]|r: buy 6", "(vendor 10c each)", "To buy: 20s 60c",
+    "sells for 50s each, so crafting saves 37s 70c each" })
+ask("what do i need to make brown linen pants", { "Brown Linen Pants", "have 1, buy 1" })
+ask("how do i level tailoring", { "Tailoring 75/75: cheapest skill-ups", "at your cap", "[Tailoring trainer]",
+    "Brown Linen Pants]|r |cffff8040orange|r - mats 4s 10c", "Linen Bag]|r |cffffff00yellow|r - mats 8s 30c", "[list]" },
+    { "Bolt of Linen Cloth]|r |c" })
+ask("recipe for red linen bag", { "Pattern: Red Linen Bag", "Thread Seller" })
+ask("recipe for linen bag", { "You already know", "(Tailoring)", "[mats]" })
+ask("how do i learn flying carpet", "No pattern, plan or recipe item teaches \"flying carpet\"")
+ask("mats for flying carpet", "None of your recipes makes \"flying carpet\"")
+ask("how do i level mining", "Mining 70: best for skill-ups")
+ask("skinning skill ups", "You don't have Skinning")
+ask("who teaches skinning", "Helene Peltskinner", { "No pattern" })
+ask("debug skills", { "GetSkillLineInfo yes", "Skills seen: Mining 70, Fishing 20", "Recipes read: Tailoring 75/75 (3 recipes)" })
+-- Without the classic skill list: modern GetProfessions, or an honest "can't read it"
+do
+    local getInfo, getNum = GetSkillLineInfo, GetNumSkillLines
+    GetSkillLineInfo, GetNumSkillLines = nil, nil
+    ask("how do i level skinning", "I can't read your Skinning skill here", { "You don't have" })
+    function GetProfessions() return 1, nil, nil, nil, nil end
+    function GetProfessionInfo(i) return "Skinning", "icon", 60, 75 end
+    ask("how do i level skinning", "Skinning 60: you can skin beasts up to level 16")
+    GetProfessions, GetProfessionInfo = nil, nil
+    GetSkillLineInfo, GetNumSkillLines = getInfo, getNum
+end
+-- The modern profession API (no classic trade skill functions): a Cooking window
+do
+    local classic = { GetTradeSkillLine, GetNumTradeSkills, GetTradeSkillInfo }
+    GetTradeSkillLine, GetNumTradeSkills, GetTradeSkillInfo = nil, nil, nil
+    itemCache[2680] = "Spiced Wolf Meat"; itemCache[2672] = "Stringy Wolf Meat"
+    C_TradeSkillUI = {
+        GetBaseProfessionInfo = function() return { professionName = "Cooking", skillLevel = 40, maxSkillLevel = 75 } end,
+        GetAllRecipeIDs = function() return { 2538, 2539 } end,
+        GetRecipeInfo = function(id)
+            if id == 2538 then return { name = "Spiced Wolf Meat", learned = true, relativeDifficulty = 0 } end
+            return { name = "Unlearned Stew", learned = false, relativeDifficulty = 0 }
+        end,
+        GetRecipeSchematic = function(id)
+            return { outputItemID = 2680, quantityMin = 1,
+                reagentSlotSchematics = { { reagents = { { itemID = 2672 } }, quantityRequired = 1 } } }
+        end,
+    }
+    fire("TRADE_SKILL_LIST_UPDATE")
+    advance(1)
+    ask("how do i level cooking", { "Cooking 40/75: cheapest skill-ups", "[Spiced Wolf Meat]|r |cffff8040orange" },
+        { "Unlearned Stew" })
+    ask("mats for spiced wolf meat", { "[Spiced Wolf Meat]|r (Cooking):", "1 |cffffffff[Stringy Wolf Meat]|r: buy 1" })
+    GetTradeSkillLine, GetNumTradeSkills, GetTradeSkillInfo = classic[1], classic[2], classic[3]
+    C_TradeSkillUI = nil
+end
 
 -- Rare alerts: Foreman Grills (rare elite, Westfall, level 21) drops a belt; your waist is empty
 do

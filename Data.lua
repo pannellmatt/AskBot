@@ -20,6 +20,7 @@ local D = {
     gearItems = {},     -- list of { itemId, requiredLevel } for weapons and armour
     rares = {},         -- npc id -> rank (2 = rare elite, 4 = rare)
     rareDrops = {},     -- rare npc id -> list of gear item ids it drops
+    recipeItems = {},   -- list of { key of what it teaches, item id, recipe name, kind ("Pattern") }
     gather = {},        -- node name -> { name, prof, skill, special, items, ids }
     gatherKeys = {},    -- name key (node or item) -> { display, nodes = { node names } }
     gatherNames = {},   -- list of { key, key, displayName } for FindByName
@@ -57,6 +58,12 @@ end
 --------------------------------------------------------------------------------------------
 
 -- Lower-case, apostrophes dropped ("Mor'Ladim" -> "morladim"), other punctuation as spaces.
+-- Recipe item prefixes -> the professions they can be for.
+D.RECIPE_KINDS = {
+    Pattern = { "Tailoring", "Leatherworking" }, Plans = { "Blacksmithing" }, Formula = { "Enchanting" },
+    Recipe = { "Alchemy", "Cooking" }, Schematic = { "Engineering" }, Manual = { "First Aid" },
+}
+
 function D.NameKey(s)
     s = s:lower():gsub("'", ""):gsub("[^%w]", " "):gsub("%s+", " ")
     return (s:match("^%s*(.-)%s*$"))
@@ -422,6 +429,14 @@ function D.BuildIndex()
     indexNames(NpcDB, npcIds, D.npcNames)
     indexNames(QuestDB, questIds, D.questNames)
     indexNames(ItemDB, itemIds, D.itemNames, D.itemIds)
+
+    -- Recipe items ("Pattern: Linen Bag"), keyed by what they teach
+    for _, e in ipairs(D.itemNames) do
+        local kind, taught = e[3]:match("^(%a+): (.+)$")
+        if kind and D.RECIPE_KINDS[kind] then
+            D.recipeItems[#D.recipeItems + 1] = { D.NameKey(taught), e[2], e[3], kind }
+        end
+    end
 
     -- Gear and quest rewards, for "/ab upgrades"
     local classOf, reqOf = ItemDB.class, ItemDB.requiredLevel
