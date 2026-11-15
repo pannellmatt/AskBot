@@ -2006,6 +2006,142 @@ local function answerUpgrades(slots, words)
     if fetching > 0 then say(GREY .. "Checking " .. fetching .. " items with the server...|r") end
 end
 
+--- "+12%", "-5%" or "about the same" for a gain over a current score.
+local function gainText(gain, current)
+    if current <= 0 then return gain > 0 and "fills an empty slot" or "about the same" end
+    local pct = math.floor(gain / current * 100 + 0.5)
+    if pct == 0 then return "about the same" end
+    return (pct > 0 and "+" or "") .. pct .. "%"
+end
+
+--- One line on whether item `id` beats what you wear: "[Item] (Legs): upgrade, +35% over
+--- [Worn Leggings] for Arms Warrior". Load the item first.
+local function upgradeVerdict(id, words)
+    local G = AskBot.Gear
+    local classFile, level = askerClass(), askerLevel()
+    local spec = G.Spec(classFile, words or {})
+    if not spec then return nil end
+    local className = UnitClass("player") or classFile
+    local r = G.Compare(id, spec, classFile, level)
+    local item = itemLinkText(id)
+    if not r.group then
+        if r.cannot == "" or not r.cannot then return item .. " isn't something you can wear." end
+        return item .. ": " .. className .. "s can't use " .. r.cannot .. "."
+    end
+    local head = item .. " (" .. G.GROUP_LABELS[r.group] .. "): "
+    local extra = ""
+    if r.req and r.req > level and not (r.needs and r.needs:find(" at ")) then
+        extra = extra .. GREY .. " (at " .. r.req .. ")|r"
+    end
+    if r.needs then extra = extra .. " |cffff8040(" .. r.needs .. ")|r" end
+    if not r.score then return head .. "I couldn't read its stats yet, ask again in a moment." end
+    if not r.gain then return head .. "you wield a two-hander, so an off hand doesn't fit." .. extra end
+    local forWho = " for " .. spec.name .. " " .. className
+    if r.currentLink and r.currentLink:find("item:" .. id .. ":", 1, true) then
+        return head .. "you're wearing it."
+    end
+    local vs = r.currentLink and (" over " .. r.currentLink) or ""
+    if r.gain > math.max(0.5, r.current * 0.03) then
+        if r.current <= 0 then return head .. "|cff40ff40upgrade|r" .. forWho .. ", fills an empty slot." .. extra end
+        return head .. "|cff40ff40upgrade|r, " .. gainText(r.gain, r.current) .. vs .. forWho .. "." .. extra
+    end
+    return head .. "not an upgrade" .. forWho .. " (" .. gainText(r.gain, r.current)
+        .. (r.currentLink and (" vs " .. r.currentLink) or "") .. ")." .. extra
+end
+
+--- "is [item] an upgrade?": loads the item, then says the verdict. `prefix` indents it when
+--- it follows another answer.
+local function answerIsUpgrade(id, words, prefix)
+    if AskBot.asker then return end
+    AskBot.Gear.Load({ id }, function()
+        local ok, line = pcall(upgradeVerdict, id, words)
+        if ok and line then say((prefix or "") .. line)
+        elseif not ok and geterrorhandler then geterrorhandler()(line) end
+    end)
+end
+
+--- Is item `id` gear (anything with an equip slot)?
+local function isGear(id)
+    local f = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+    local loc = f and select(4, f(id))
+    return loc ~= nil and loc ~= "" and loc ~= "INVTYPE_NON_EQUIP_IGNORE" and loc ~= "INVTYPE_BAG"
+        and loc ~= "INVTYPE_AMMO" and loc ~= "INVTYPE_QUIVER" and loc ~= "INVTYPE_TABARD" and loc ~= "INVTYPE_BODY"
+end
+
+--- Words that ask "is it better than mine?" (with the item's own name taken out).
+local function asksUpgrade(rest)
+    local w = wordSet(rest)
+    return w.upgrade or w.upgrades or w.better or w.equip or w.wear or w.compare or w.bis or w.sidegrade
+        or rest:find("worth it", 1, true) or rest:find("worth using", 1, true) or rest:find("should i use", 1, true)
+end
+
+local UPGRADE_NAME_PATTERNS = { "^is (.+) an upgrade", "^is (.+) a upgrade", "^is (.+) better", "^is (.+) worth it",
+    "^is (.+) worth using", "^should i equip (.+)$", "^should i wear (.+)$", "^should i use (.+)$", "^compare (.+)$",
+    "^would (.+) be an upgrade", "^(.+) upgrade$" }
+
+--------------------------------------------------------------------------------------------
+-- Rare alerts: entering a zone with a rare near your level that drops an upgrade
+--------------------------------------------------------------------------------------------
+
+local rareAlerted = {} -- uiMapId -> GetTime() of the last alert
+
+local function checkRares()
+    if D.status ~= "ready" or not AskBot.Option("rareAlerts") or AskBot.asker then return end
+    local mapId = currentZoneMap()
+    if not mapId then return end
+    local now = GetTime and GetTime() or 0
+    if rareAlerted[mapId] and now - rareAlerted[mapId] < 1800 then return end
+    rareAlerted[mapId] = now
+    local level = askerLevel()
+    local found, ids = {}, {}
+    for npc, items in pairs(D.rareDrops) do
+        local lo, hi = NpcDB.minLevel(npc) or 0, NpcDB.maxLevel(npc) or NpcDB.minLevel(npc) or 0
+        if hi >= level - 3 and lo <= level + 3 then
+            local place = D.NpcPlace(npc)
+            local here = {}
+            for _, s in ipairs(place and place.spawns or {}) do
+                if s.uiMapId == mapId then here[#here + 1] = s end
+            end
+            if #here > 0 then
+                found[#found + 1] = { npc = npc, place = place, spawns = here, items = items, lo = lo, hi = hi }
+                for _, id in ipairs(items) do ids[#ids + 1] = id end
+            end
+        end
+    end
+    if #found == 0 then return end
+    local G = AskBot.Gear
+    AskBot.Gear.Load(ids, function()
+        local classFile = askerClass()
+        local spec = G.Spec(classFile, {})
+        if not spec then return end
+        local alerts = {}
+        for _, f in ipairs(found) do
+            for _, id in ipairs(f.items) do
+                local r = G.Compare(id, spec, classFile, level)
+                if r.gain and not r.needs and (r.req or 0) <= level + 2
+                    and r.gain > math.max(0.5, r.current * 0.03) then
+                    local rel = r.current > 0 and r.gain / r.current or 1
+                    if not f.best or rel > f.rel then f.best, f.rel, f.r = id, rel, r end
+                end
+            end
+            if f.best then alerts[#alerts + 1] = f end
+        end
+        table.sort(alerts, function(a, b) return a.rel > b.rel end)
+        for i = 1, math.min(2, #alerts) do
+            local f = alerts[i]
+            local place = { kind = f.place.kind, id = f.npc, name = f.place.name, spawns = f.spawns }
+            local best = D.Rank({ place })[1]
+            local lvl = f.lo == f.hi and f.lo or (f.lo .. "-" .. f.hi)
+            say("Rare here: " .. GOLD .. f.place.name .. "|r (" .. lvl .. (D.rares[f.npc] == 2 and " elite" or "")
+                .. ") can drop " .. itemLinkText(f.best)
+                .. (f.r.current > 0 and (" " .. gainText(f.r.gain, f.r.current) .. " " .. G.GROUP_LABELS[f.r.group]:lower())
+                    or (" for your empty " .. G.GROUP_LABELS[f.r.group]:lower() .. " slot"))
+                .. (best and (" " .. pinLink(best.place, best.spawn, f.place.name)) or ""))
+        end
+    end)
+end
+AskBot.CheckRares = checkRares
+
 --------------------------------------------------------------------------------------------
 -- Gathering: mining veins, herbs, fishing schools
 --------------------------------------------------------------------------------------------
@@ -2812,9 +2948,33 @@ local function answer(question)
     if itemId then
         local id = tonumber(itemId)
         local hits = { { nil, id, itemName(id) } }
+        -- "is [item] an upgrade?", "[item] better for tank?" (the item's name doesn't count)
+        local rest = normalize((question:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|H.-|h.-|h", " "):gsub("|r", "")))
+        if asksUpgrade(rest) and isGear(id) and not AskBot.asker then return answerIsUpgrade(id, wordSet(rest)) end
         if intent == "price" then return answerPrice(nil, hits) end
         local mode = (intent == "buy" or intent == "drop") and intent or "get"
-        return answerItem(nil, mode, hits)
+        answerItem(nil, mode, hits)
+        -- A bare shift-clicked piece of gear also says whether it's an upgrade.
+        if not intent and rest == "" and isGear(id) then answerIsUpgrade(id, {}, "  ") end
+        return
+    end
+
+    -- "/ab target": whatever you have targeted, as if you'd typed its name.
+    if q == "target" or q == "my target" or q == "this" or q == "who is this" or q == "who is my target" then
+        local name = UnitExists and UnitExists("target") and UnitName("target")
+        if not name then return say("Target something first, then ask " .. GOLD .. "/ab target|r.") end
+        if UnitIsPlayer and UnitIsPlayer("target") then return answerPerson(name:lower()) or say(name .. " is a player.") end
+        return answer(name)
+    end
+
+    -- "is Militia Leggings an upgrade?" by name
+    for _, pattern in ipairs(UPGRADE_NAME_PATTERNS) do
+        local name = q:match(pattern)
+        if name then
+            name = name:gsub("^the ", ""):gsub("^my ", "")
+            local hits = exactHits(D.itemNames, name)
+            if hits and isGear(hits[1][2]) and not AskBot.asker then return answerIsUpgrade(hits[1][2], wordSet(q)) end
+        end
     end
 
     local gearSlots, gearWords = gearQuestion(q)
@@ -3014,6 +3174,7 @@ local events = CreateFrame("Frame")
 events:RegisterEvent("PLAYER_LOGIN")
 events:RegisterEvent("TAXIMAP_OPENED")
 events:RegisterEvent("AUCTION_HOUSE_SHOW")
+events:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 events:SetScript("OnEvent", function(_, event)
     if event == "PLAYER_LOGIN" then
         AskBotCharDB = AskBotCharDB or {}
@@ -3024,6 +3185,12 @@ events:SetScript("OnEvent", function(_, event)
         if ok and learned and learned > 0 then
             say("Learned " .. learned .. " flight path" .. (learned == 1 and "" or "s") .. " for route planning.")
         end
+    elseif event == "ZONE_CHANGED_NEW_AREA" then
+        -- Let the map settle before asking which zone this is.
+        C_Timer.After(3, function()
+            local ok, err = pcall(checkRares)
+            if not ok and geterrorhandler then geterrorhandler()(err) end
+        end)
     elseif event == "AUCTION_HOUSE_SHOW" then
         -- A refresh was asked for away from the AH; give Auctionator a moment to set up.
         if AskBotCharDB and AskBotCharDB.refreshPending then
@@ -3050,6 +3217,7 @@ local function help()
     say("  /askbot what do I need before Deadmines    /askbot who has [quest]")
     say("  /askbot where can I mine copper    /askbot Peacebloom    /askbot where should I mine")
     say("  /askbot upgrades    /askbot upgrades legs    /askbot what gear should I get as a feral druid")
+    say("  /askbot is [item] an upgrade    /askbot target")
     say("  /askbot where is my party    /askbot where is <name>")
     say("Click " .. "|cff71d5ff[pin]|r" .. " on any answer to put a pin on it.")
     say("/askbot clear - remove the pin.  /askbot status - index info.  Also /ab and /ask.")
@@ -3104,6 +3272,13 @@ local function debugItem(text)
         end
         table.sort(parts)
         say("  stats: " .. (#parts > 0 and table.concat(parts, ", ") or "none reported"))
+        if link then
+            local merged, fromTooltip = G.Stats(link)
+            local extra = {}
+            for key in pairs(fromTooltip) do extra[#extra + 1] = key .. "=" .. merged[key] end
+            table.sort(extra)
+            if #extra > 0 then say("  from Equip: lines: " .. table.concat(extra, ", ")) end
+        end
         say("  score for " .. (spec and spec.name or "?") .. ": " .. tostring(spec and link and G.Score(link, spec.weights, group == "ranged")))
     end)
 end
@@ -3238,6 +3413,13 @@ end
 function AskBot.IsPersonalQuestion(question)
     local q = normalize(question)
     if gearQuestion(q) then return true end
+    if question:find("|Hitem:") then
+        local rest = normalize((question:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|H.-|h.-|h", " "):gsub("|r", "")))
+        if asksUpgrade(rest) then return true end
+    end
+    for _, pattern in ipairs(UPGRADE_NAME_PATTERNS) do
+        if q:find(pattern) then return true end
+    end
     for _, entry in ipairs(SPECIAL) do
         if entry[1] == "next" or entry[1] == "questLog" or entry[1] == "handIn" or entry[1] == "tidy"
             or entry[1] == "questsHere" or entry[1] == "questNext" or entry[1] == "zones" then

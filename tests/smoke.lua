@@ -260,6 +260,8 @@ local items = {
     [6994] = { name = "Whitestone Oak Lumber", npcDrops = { 641 } },
     [9001] = { name = "Militia Leggings", questRewards = { 112 } },
     [9005] = { name = "Apprentice Wand", questRewards = { 112 } },
+    [9020] = { name = "Grills' Girdle", npcDrops = { 20 } },               -- dropped by a rare in Westfall
+    [9022] = { name = "Spell Ring" },
     [9004] = { name = "Silver Ring" },
 }
 local objects = { [500] = { "Wanted Poster", { [W] = { { 53, 52 } } } }, [501] = { "Shrine of Remulos", { [W] = { { 20, 80 } } } },
@@ -361,7 +363,18 @@ gear = {
     [5193] = { "Cape of the Brotherhood", "INVTYPE_CLOAK", 4, 1, 19, 24, { ITEM_MOD_AGILITY_SHORT = 3, ITEM_MOD_STAMINA_SHORT = 3 } },
     [10399] = { "Blackened Defias Armor", "INVTYPE_CHEST", 4, 2, 21, 26, { ITEM_MOD_AGILITY_SHORT = 8, ITEM_MOD_STAMINA_SHORT = 8, RESISTANCE0_NAME = 80 } },
     [872] = { "Rockslicer", "INVTYPE_2HWEAPON", 2, 1, 19, 24, { ITEM_MOD_DAMAGE_PER_SECOND_SHORT = 15, ITEM_MOD_STRENGTH_SHORT = 10 } },
+    [9020] = { "Grills' Girdle", "INVTYPE_WAIST", 4, 3, 19, 24, { ITEM_MOD_STRENGTH_SHORT = 4 } },
+    [9021] = { "Heavy Plate Helm", "INVTYPE_HEAD", 4, 4, 20, 25, { ITEM_MOD_STAMINA_SHORT = 6 } },
+    [9022] = { "Spell Ring", "INVTYPE_FINGER", 4, 0, 18, 22, {} },          -- its only stat is an Equip: line
 }
+-- Tooltip lines (C_TooltipInfo) for items whose bonuses only show as "Equip:" text
+local tooltips = { [9022] = { "Spell Ring", "Equip: Increases damage and healing done by magical spells and effects by up to 7." } }
+C_TooltipInfo = { GetHyperlink = function(link)
+    local id = tonumber(tostring(link):match("item:(%d+)"))
+    local lines = {}
+    for _, t in ipairs(tooltips[id] or {}) do lines[#lines + 1] = { leftText = t } end
+    return { lines = lines }
+end }
 for id, g in pairs(gear) do
     if g[8] == nil then g[8] = true end
     itemCache[id] = itemCache[id] or g[1]
@@ -829,6 +842,41 @@ ask("what gear should i get", { "Upgrades for Arms Warrior", "Guessing Arms (no 
 talents = { 11, 0, 0 }
 ask("debug item 9001", { "slot legs", "needs level 18", "ITEM_MOD_STRENGTH_SHORT=5", "score for Arms: 8.6" })
 ask("nearest weapon master", "Weapon Master", { "Upgrades for" })
+
+-- One item against what you wear
+local function link(id) return "|cff1eff00|Hitem:" .. id .. "::|h[" .. gear[id][1] .. "]|h|r" end
+ask("is " .. link(9001) .. " an upgrade?", { "[Militia Leggings]|h|r (Legs): ", "upgrade|r, +514% over",
+    "[Worn Leggings]", "for Arms Warrior." }, { "not an upgrade", "drops from" })
+ask("is militia leggings an upgrade", { "(Legs): ", "upgrade|r, +514%" })
+ask("is " .. link(9012) .. " better as tank", { "(Weapon): you're wearing it." })
+ask(link(9021) .. " upgrade?", { "(Head): ", "upgrade|r for Arms Warrior, fills an empty slot.", "(Plate Mail at 40)" }, { "(at 40)" })
+ask("should i use " .. link(9005), "[Apprentice Wand]|h|r: Warriors can't use Wands.")
+-- A bare shift-clicked piece of gear: where it comes from, then the verdict
+ask(link(872), { "Rockslicer", "  |cff1eff00|Hitem:872::|h[Rockslicer]|h|r (Two-hander): ", "(train Two-Handed Axes)" })
+-- "Equip:" bonuses the game's stat list leaves out are read from the tooltip
+ask("debug item 9022", { "stats: none reported", "from Equip: lines: SP=7" })
+ask("is " .. link(9022) .. " an upgrade as healer", "not an upgrade for Arms Warrior")  -- no healer spec: talents decide
+-- "/ab target"
+ask("target", "Target something first")
+
+-- Rare alerts: Foreman Grills (rare elite, Westfall, level 21) drops a belt; your waist is empty
+do
+    local from = #output + 1
+    fire("ZONE_CHANGED_NEW_AREA")
+    advance(3)
+    local text = table.concat(output, "\n", from)
+    for _, e in ipairs({ "Rare here: |cffffd100Foreman Grills|r (21 elite) can drop", "[Grills' Girdle]",
+        "for your empty waist slot", "[pin]" }) do
+        if not text:find(e, 1, true) and not text:find(e:gsub("%[pin%]", "|Haddon:askbot:"), 1, true) then
+            failures = failures + 1; print("   !! FAIL: expected " .. e)
+        end
+    end
+    from = #output + 1
+    fire("ZONE_CHANGED_NEW_AREA")
+    advance(3)
+    if #output >= from then failures = failures + 1; print("   !! FAIL: rare alert repeated") end
+    AskBot.SetOption("rareAlerts", false)
+end
 
 -- Settings and "!ask" from other players --------------------------------------------------
 local function expectChat(label, fn, expect, reject)

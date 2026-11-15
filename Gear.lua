@@ -204,37 +204,39 @@ end
 
 --- Can `classFile` use item `id` at `level` + 5? Returns the slot group (nil if not), the
 --- required level, and what's still needed ("train Two-Handed Swords", "Plate Mail at 40").
-function Gear.Check(id, classFile, level, skills)
+--- With `anyLevel`, items far above your level are still checked; the fourth return value then
+--- says why an item can't be used at all ("Plate Mail", "Bows"; "" when it isn't gear).
+function Gear.Check(id, classFile, level, skills, anyLevel)
     local equipLoc, classID, sub = itemInfoInstant(id)
     local group = equipLoc and GROUP_OF[equipLoc]
-    if not group then return nil end
+    if not group then return nil, nil, nil, "" end
     classID = (ItemDB.class and ItemDB.class(id)) or classID
     sub = (ItemDB.subClass and ItemDB.subClass(id)) or sub
     local req = (ItemDB.requiredLevel and ItemDB.requiredLevel(id)) or 0
-    if req > level + 5 then return nil end
+    if req > level + 5 and not anyLevel then return nil end
     local needs
     if classID == 4 then
         if sub == 6 then
-            if not SHIELDS[classFile] then return nil end
+            if not SHIELDS[classFile] then return nil, nil, nil, "Shields" end
             if skills and not skills.Shield then needs = "train Shield" end
         elseif sub and sub >= 1 and sub <= 4 and equipLoc ~= "INVTYPE_CLOAK" then
             local armor = ARMOR[classFile]
-            if not armor or sub > armor[2] then return nil end
+            if not armor or sub > armor[2] then return nil, nil, nil, ARMOR_NAMES[sub] end
             if sub > armor[1] then
                 if math.max(level, req) < 40 then
                     needs = ARMOR_NAMES[sub] .. " at 40"
                     req = math.max(req, 40)
-                    if req > level + 5 then return nil end
+                    if req > level + 5 and not anyLevel then return nil end
                 elseif skills and not skills[ARMOR_NAMES[sub]] then
                     needs = "train " .. ARMOR_NAMES[sub]
                 end
             end
         elseif sub and sub > 6 then
-            return nil -- librams, idols, totems
+            return nil, nil, nil, "librams, idols and totems" -- not scored
         end
     elseif classID == 2 then
         local can = WEAPONS[classFile]
-        if not can or not can[sub] then return nil end
+        if not can or not can[sub] then return nil, nil, nil, WEAPON_NAMES[sub] or "that weapon type" end
         local skill = WEAPON_NAMES[sub]
         if skills and skill and not skills[skill] then needs = "train " .. skill end
     end
@@ -291,16 +293,91 @@ local function itemStats(link)
     return ok and type(stats) == "table" and stats or {}
 end
 
+-- Vanilla "Equip:" lines -> stat keys. School-specific spell damage ("Shadow spells") counts
+-- half, since the weights don't know your school.
+local EQUIP_LINES = {
+    { "^Equip: Increases damage and healing done by magical spells and effects by up to (%d+)", "SP" },
+    { "^Equip: Increases healing done by spells and effects by up to (%d+)", "HEAL" },
+    { "^Equip: Increases damage done by %a+ spells and effects by up to (%d+)", "SP", 0.5 },
+    { "^Equip: %+(%d+) ranged Attack Power", "RAP" },
+    { "^Equip: %+(%d+) Attack Power", "AP" },
+    { "^Equip: Improves your chance to hit with spells by (%d+)%%", "SPELLHIT" },
+    { "^Equip: Improves your chance to get a critical strike with spells by (%d+)%%", "SPELLCRIT" },
+    { "^Equip: Improves your chance to hit by (%d+)%%", "HIT" },
+    { "^Equip: Improves your chance to get a critical strike by (%d+)%%", "CRIT" },
+    { "^Equip: Restores (%d+) mana per 5 sec", "MP5" },
+    { "^Equip: Increased Defense %+(%d+)", "DEF" },
+    { "^Equip: Increases the block value of your shield by (%d+)", "BLOCK" },
+}
+
+local scanTip
+local function tooltipLines(link)
+    local out = {}
+    if C_TooltipInfo and C_TooltipInfo.GetHyperlink then
+        local ok, data = pcall(C_TooltipInfo.GetHyperlink, link)
+        if ok and type(data) == "table" and data.lines then
+            for _, line in ipairs(data.lines) do
+                if line.leftText then out[#out + 1] = line.leftText end
+            end
+            return out
+        end
+    end
+    if scanTip == false then return out end
+    if not scanTip then
+        local ok, tip = pcall(CreateFrame, "GameTooltip", "AskBotScanTooltip", nil, "GameTooltipTemplate")
+        scanTip = ok and tip and tip.SetHyperlink and tip or false
+        if not scanTip then return out end
+    end
+    local ok = pcall(function()
+        scanTip:SetOwner(WorldFrame, "ANCHOR_NONE")
+        scanTip:ClearLines()
+        scanTip:SetHyperlink(link)
+        for i = 2, scanTip:NumLines() do
+            local fs = _G["AskBotScanTooltipTextLeft" .. i]
+            local text = fs and fs:GetText()
+            if text then out[#out + 1] = text end
+        end
+    end)
+    return ok and out or {}
+end
+
+local statCache = {}
+--- An item's stats as weight keys ({ STR = 5, SP = 12, ... }), and which keys were read
+--- from its "Equip:" tooltip lines because the game's stat list didn't have them.
+function Gear.Stats(link)
+    local cached = statCache[link]
+    if cached then return cached[1], cached[2] end
+    local stats, fromTooltip = {}, {}
+    for stat, value in pairs(itemStats(link)) do
+        local key = STAT_KEYS[stat]
+        if key and type(value) == "number" then stats[key] = (stats[key] or 0) + value end
+    end
+    for _, text in ipairs(tooltipLines(link)) do
+        for _, rule in ipairs(EQUIP_LINES) do
+            local n = tonumber(text:match(rule[1]))
+            if n then
+                if not stats[rule[2]] or fromTooltip[rule[2]] then
+                    stats[rule[2]] = (stats[rule[2]] or 0) + n * (rule[3] or 1)
+                    fromTooltip[rule[2]] = true
+                end
+                break
+            end
+        end
+    end
+    -- Only cache once the client knows the item (an unknown item reads as empty).
+    if getInfo(link) then statCache[link] = { stats, fromTooltip } end
+    return stats, fromTooltip
+end
+
 --- Score an item (link or ID) with spec weights; `ranged` uses the ranged-DPS weight.
 function Gear.Score(item, weights, ranged)
     local link = type(item) == "string" and item or select(2, getInfo(item))
     if not link then return nil end
     local score = 0
-    for stat, value in pairs(itemStats(link)) do
-        local key = STAT_KEYS[stat]
+    for key, value in pairs((Gear.Stats(link))) do
         if key == "DPS" and ranged then key = "RDPS" end
-        local w = key and weights[key]
-        if w and type(value) == "number" then score = score + w * value end
+        local w = weights[key]
+        if w then score = score + w * value end
     end
     return score
 end
@@ -338,6 +415,22 @@ function Gear.Current(weights, classFile)
         out.offhand = { score = oh, link = ohLink }
     end
     return out
+end
+
+--- One item against what you wear. Returns a table: { group, req, needs, cannot, score,
+--- current, currentLink, gain }. `cannot` names what your class can't use ("" when the item
+--- isn't gear); `gain` is score minus current (nil when the slot can't be compared, such as an
+--- off hand while you wield a two-hander). Load the item first (Gear.Load).
+function Gear.Compare(id, spec, classFile, level)
+    local group, req, needs, cannot = Gear.Check(id, classFile, level, Gear.Skills(), true)
+    local r = { group = group, req = req, needs = needs, cannot = cannot }
+    if not group then return r end
+    r.score = Gear.Score(id, spec.weights, group == "ranged")
+    local cur = Gear.Current(spec.weights, classFile)[group]
+    if r.score and cur then
+        r.current, r.currentLink, r.gain = cur.score, cur.link, r.score - cur.score
+    end
+    return r
 end
 
 --------------------------------------------------------------------------------------------

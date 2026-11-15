@@ -19,6 +19,7 @@ local D = {
     questRewardItems = {}, -- quest id -> items it rewards
     gearItems = {},     -- list of { itemId, requiredLevel } for weapons and armour
     rares = {},         -- npc id -> rank (2 = rare elite, 4 = rare)
+    rareDrops = {},     -- rare npc id -> list of gear item ids it drops
     gather = {},        -- node name -> { name, prof, skill, special, items, ids }
     gatherKeys = {},    -- name key (node or item) -> { display, nodes = { node names } }
     gatherNames = {},   -- list of { key, key, displayName } for FindByName
@@ -429,6 +430,13 @@ function D.BuildIndex()
         local cls = classOf and classOf(id)
         if cls == 2 or cls == 4 then
             D.gearItems[#D.gearItems + 1] = { id, (reqOf and reqOf(id)) or 0 }
+            for _, npc in ipairs(ItemDB.npcDrops(id) or {}) do
+                if D.rares[npc] then
+                    local list = D.rareDrops[npc]
+                    if not list then list = {}; D.rareDrops[npc] = list end
+                    list[#list + 1] = id
+                end
+            end
             for _, q in ipairs(ItemDB.questRewards(id) or {}) do
                 local list = D.questRewardItems[q]
                 if not list then list = {}; D.questRewardItems[q] = list end

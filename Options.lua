@@ -9,6 +9,7 @@ local DEFAULTS = {
     shareGuild = false,   -- answer "!ask" questions in guild chat
     shareParty = false,   -- ... in party and raid chat
     shareWhisper = false, -- ... in whispers
+    rareAlerts = true,    -- say when a zone you enter has a rare that drops an upgrade
 }
 AskBot.DEFAULTS = DEFAULTS
 
@@ -46,6 +47,9 @@ local function registerPanel()
     end
     Settings.CreateSlider(category, results, sliderOptions,
         "How many places to list for questions like 'nearest skinning trainer'.")
+
+    checkbox("rareAlerts", "Rare alerts",
+        "When you enter a zone, say if a rare mob near your level there can drop an upgrade for you.")
 
     checkbox("shareGuild", "Answer !ask in guild chat",
         "When a guild member types '!ask <question>' in guild chat, AskBot answers there for them.")

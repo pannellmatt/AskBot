@@ -60,6 +60,8 @@ Vendors that sell it, mobs and objects that drop it, quests that reward it, and 
 - `/ab where can I buy Coarse Thread`
 - `/ab where does Linen Cloth drop`
 - `/ab where can I get [shift-clicked item]`
+- `/ab [shift-clicked item]` on its own does the same, and for gear also says whether it's an upgrade.
+- `/ab target`: asks about whatever you have targeted.
 
 ### Gear upgrades
 AskBot compares what you're wearing with gear you can get soon: rewards from quests in your log or that you can take within five levels, dungeon drops near your level *(with AtlasLoot)*, and gear on the auction house *(with Auctionator)*. It shows the best upgrade for each slot and where to get it.
@@ -68,7 +70,9 @@ AskBot compares what you're wearing with gear you can get soon: rewards from que
 - `/ab what boss drops are good for me` (or `upgrades from dungeons`, `upgrades from quests`, `AH upgrades`): one kind of source only. The dungeon version also ranks dungeons by how many upgrades they hold.
 - **Your spec** comes from your talents. Name one to override it: `/ab upgrades as tank`, `I'm a feral druid, what gear should I go for`.
 - **Not usable yet?** Items you'll be able to use are still listed, marked e.g. *(at 26)*, *(Plate Mail at 40)* or *(train Two-Handed Axes)* with a link to the nearest weapon master.
-- Items are scored with simple stat weights per spec, so treat the list as a guide. `/ab debug item [item]` shows an item's stats and score.
+- `/ab is [item] an upgrade?` (or `is Militia Leggings better`, `should I use [item]`, `[item] upgrade as tank`): one item against what you're wearing, e.g. *+35% over [Worn Leggings]*, or why your class can't use it.
+- **Rare alerts:** when you enter a zone, AskBot says if a rare mob near your level there can drop an upgrade for you, with a pin. Turn it off in `/ab options`.
+- Items are scored with simple stat weights per spec, so treat the list as a guide. Bonuses that only appear as "Equip:" lines (spell damage, attack power, hit, crit, mana regen) are read from the item's tooltip. `/ab debug item [item]` shows an item's stats and score.
 
 ### Mining, herbs and fishing schools
 The nearest node, the zones with the most nodes, and whether your skill is high enough (coloured like the game's skill-up colours).
@@ -140,6 +144,7 @@ Thor <Gryphon Master> - Westfall 56.6, 52.6 (71 yds, <1 min)
 `/ab options` opens AskBot's page in the game's Settings, under AddOns:
 - whether to pin the best answer automatically
 - how many results to list (1-5)
+- rare alerts when you enter a zone
 - which chats friends can `!ask` in
 
 ---
