@@ -27,6 +27,7 @@ Built for **World of Warcraft: Forever**.
 - `/ab which quests should I abandon` (or `/ab tidy quest log`): grey quests, quests that need a group (elite, dungeon) and quests whose next step is far away.
 - `/ab best quests` (or `which quests give the most xp`): the quests in your log and the nearest ones you can pick up, ranked by XP per minute. The XP is Questie's real Forever figure for your level. The minutes are a rough estimate: travel to the quest giver, the objectives (kills, items that drop, things to click, what you've already done) and the walk back. Quests well above your level are left out.
 - `/ab quests near The Grizzled Den` (or `what else can I do near …`): other quests whose objectives are in the same spot, ones to pick up (with their XP and a pin on the giver) and ones already in your log. Asking who gives a quest also adds a "Same area:" line, so you can grab them together.
+- `/ab what quests take me to Ironforge` (or `quests that go to …`): quests in your log and ones you can pick up whose turn-in, or the nearest place to do an objective, is in that zone, plus a "Coming up" line for ones that open within two levels or after an earlier quest.
 - `/ab quests here`: quests you can pick up, nearest first, grouped by who gives them and coloured by difficulty, with their XP. AskBot uses Questie's own checks, so completed quests, missing prerequisites, quests for other classes and grey quests are all left out.
 - `/ab dungeons` (or `/ab dungeons for level 25`): dungeons that suit your level, with entrance pins and a link to their loot *(with AtlasLoot)*.
 - `/ab what do I need before Deadmines` (or `/ab SFK quests`, `/ab prep for Gnomeregan`): the dungeon's entrance and the quests to pick up before you go, grouped by quest giver. Quests for later levels, quests that aren't available yet (with links explaining why) and the dungeon's quests your group already has are listed too. Class quests with an objective inside count. Short names such as VC, SFK, BFD, RFK and ZF work.
@@ -72,12 +73,12 @@ Vendors that sell it, mobs and objects that drop it, quests that reward it, and 
 - `/ab target`: asks about whatever you have targeted.
 
 ### Gear upgrades
-AskBot compares what you're wearing with gear you can get soon: rewards from quests in your log or that you can take within five levels, dungeon drops near your level *(with AtlasLoot)*, and gear on the auction house *(with Auctionator)*. It shows the best upgrade for each slot and where to get it.
+AskBot compares what you're wearing with gear you can get soon: rewards from quests in your log or that you can take within two levels, dungeon drops near your level *(with AtlasLoot)*, and gear on the auction house *(with Auctionator)*. It shows the best upgrade for each slot and where to get it.
 
 - `/ab upgrades` (or `what gear should I get`, `better weapon`, `upgrades legs`)
 - `/ab what boss drops are good for me` (or `upgrades from dungeons`, `upgrades from quests`, `AH upgrades`): one kind of source only. The dungeon version also ranks dungeons by how many upgrades they hold.
 - **Your spec** comes from your talents. Before you've spent any (or when two trees are close), AskBot uses a common levelling spec and says so, e.g. *for Warrior (no talents yet, scored as Arms)*. Name a spec to override it: `/ab upgrades as tank`, `I'm a feral druid, what gear should I go for`.
-- **Not usable yet?** Items you'll be able to use are still listed, marked e.g. *(at 26)*, *(Plate Mail at 40)* or *(train Two-Handed Axes)* with a link to the nearest weapon master.
+- **Not usable yet?** Items you'll be able to use within two levels are still listed, marked e.g. *(at 26)*, *(Plate Mail at 40)* or *(train Two-Handed Axes)* with a link to the nearest weapon master.
 - `/ab is [item] an upgrade?` (or `is Militia Leggings better`, `should I use [item]`, `[item] upgrade as tank`): one item against what you're wearing, e.g. *+35% over [Worn Leggings]*, or why your class can't use it.
 - `/ab anything in my bags an upgrade?` (or `any upgrades in my bags`, `bag upgrades as tank`): every piece of gear in your bags that beats what you're wearing, biggest gain first.
 - **Rare alerts:** when you enter a zone, AskBot says if a rare mob near your level there can drop an upgrade for you, with a pin. Turn it off in `/ab options`.
@@ -158,7 +159,7 @@ Thor <Gryphon Master> - Westfall 56.6, 52.6 (71 yds, <1 min)
 - **Pins for them too:** each answer carries the game's own `[Map Pin Location]` link, which anyone can click to put the spot on their map, no addon needed.
 - **No spam:** it's off by default, answers are at most four lines, and there's a cooldown per person.
 - **Several AskBots:** when more than one guild member runs AskBot, only one of them answers.
-- **Questions about your own character:** "what should I do", "my quests", "hand in route", "tidy quest log", "quests here", "best quests", "quests near …", gear upgrades, bag upgrades, skills to train, mats lists, profession skill-up plans and your hearthstone need the asker's own quest log, gear, bags or trainer list, so they only work with `/ab`.
+- **Questions about your own character:** "what should I do", "my quests", "hand in route", "tidy quest log", "quests here", "best quests", "quests near …", "quests that take me to …", gear upgrades, bag upgrades, skills to train, mats lists, profession skill-up plans and your hearthstone need the asker's own quest log, gear, bags or trainer list, so they only work with `/ab`.
 
 ## Settings
 

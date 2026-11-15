@@ -217,6 +217,12 @@ local quests = {
         { nil, nil, { { 6994 } } } },
     [146] = { "Warrior Errand", 1, { { 6 } }, { { 6 } }, 20, 18, { { { 641 } } } }, -- warrior: kill inside
     [147] = { "The Defias Note", 1, { nil, nil, { 9030 } }, { { 9 } }, 20, 15 },  -- started by an item
+    -- Handed in at Redridge, given in Stormwind: one needs level 21, one comes after another quest,
+    -- one is for paladins
+    [148] = { "Redridge Summons", 1, { { 6 } }, { { 16 } }, 21, 21 },
+    [149] = { "Redridge Orders", 1, { { 6 } }, { { 16 } }, 18, 15 },
+    [150] = { "Paladin Summons", 1, { { 6 } }, { { 16 } }, 18, 15 },
+    [151] = { "Lead-in Orders", 1, { { 6 } }, { { 6 } }, 15, 12 },
     [130] = { "Chain Part 1", 1, { { 25 } }, { { 25 } }, 14, 10 },
     [131] = { "Chain Part 2", 1, { { 25 } }, { { 25 } }, 16, 12 },
     [132] = { "Chain Part 3", 1, { { 25 } }, { { 25 } }, 18, 15 },
@@ -253,12 +259,12 @@ local questLog = {
 local chain = {
     [131] = { single = { 130, 134 } }, [132] = { group = { 131, 133 }, crumbs = { 137 } },
     [136] = { single = { 135 } }, [130] = { nextQuest = 131 },
-    [143] = { single = { 142 } },
+    [143] = { single = { 142 } }, [149] = { single = { 151 } },
 }
 local questZone = { [142] = 1581, [143] = 1581, [144] = 1581 }
 -- Reputation rewards: Stormwind (72)
 local questRep = { [100] = { { 72, 75 } }, [105] = { { 72, 250 } }, [109] = { { 72, 150 } }, [107] = { { 72, 500 } } }
-local questClasses = { [145] = 2, [146] = 1 } -- paladin, warrior
+local questClasses = { [145] = 2, [146] = 1, [150] = 2 } -- paladin, warrior
 local completed = { [135] = true }
 C_QuestLog = {
     IsQuestFlaggedCompleted = function(id) return completed[id] == true end,
@@ -709,6 +715,17 @@ ask("what else can i do near goretusk liver pie", { "Westfall Stew", "Red Linen 
 ask("who gives goretusk liver pie", { "Goretusk Liver Pie|r (level 16, needs 12, 1200 xp)", "Same area:", "Westfall Stew" })
 ask("quests near me", "Quests you can pick up")
 ask("quests near patrolling westfall", "has nothing to do out in the world")
+-- Quests that take you to a zone: Scout Redridge (in your log) and a new quest handed in there
+doable[1786] = true
+ask("what quests take me to redridge", { "Quests that take you to |cffffd100Redridge Mountains|r (2):",
+    "Scout Redridge", "in your log", "The Tome of Divinity", "hand in to |cffffd100Martie Jainrose",
+    "from|r |cffffd100Gryan Stoutmantle" }, { "Redridge Goulash", "Blackrock Menace" })
+doable[1786] = nil
+ask("quests that take me to narnia", "None of your quests")
+ask("what quests take me to redridge", { "Coming up:|r ", "Redridge Summons|r|cffaaaaaa (at 21)",
+    "Redridge Orders|r|cffaaaaaa (after Lead-in Orders)" }, { "Paladin Summons", "Lead-in Orders|r|cffaaaaaa" })
+-- Linen Cloth also drops from Kobold Vermin in Dun Morogh, but the nearest source is Westfall's thugs
+ask("what quests take me to dun morogh", "None of your quests", { "Westfall Stew", "Red Linen Goods" })
 
 -- Next town: zones you're not in name their town's flight path, once a flight map has
 -- shown its name; "not learned" when AskBot knows your flight paths and it isn't one.
@@ -897,6 +914,10 @@ do
 end
 if lastPinTitle ~= "Martie Jainrose (upgrade)" then failures = failures + 1; print("   !! FAIL: pinned " .. tostring(lastPinTitle)) end
 ask("upgrades legs", { "(legs)", "Militia Leggings" }, { "Rockslicer", "Silver Ring" })
+-- Only gear you can use within two levels: the same chest needing level 23 is left out
+gear[10399][5] = 23
+ask("upgrades chest", "Upgrades for", { "Blackened Defias Armor" })
+gear[10399][5] = 21
 -- Dungeon drops only, with the dungeons ranked
 ask("what boss drops are good for me?", { "Upgrades from dungeons for Arms Warrior", "Chest: ", "Blackened Defias Armor",
     "Back: ", "Two-hander: ", "By dungeon:", "The Deadmines|r lvl 10-26: 3 upgrades (" },

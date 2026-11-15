@@ -202,7 +202,10 @@ function Gear.Skills()
     return have
 end
 
---- Can `classFile` use item `id` at `level` + 5? Returns the slot group (nil if not), the
+-- Upgrade suggestions only include gear you can use within this many levels.
+Gear.LEVEL_AHEAD = 2
+
+--- Can `classFile` use item `id` at `level` + LEVEL_AHEAD? Returns the slot group (nil if not), the
 --- required level, and what's still needed ("train Two-Handed Swords", "Plate Mail at 40").
 --- With `anyLevel`, items far above your level are still checked; the fourth return value then
 --- says why an item can't be used at all ("Plate Mail", "Bows"; "" when it isn't gear).
@@ -213,7 +216,7 @@ function Gear.Check(id, classFile, level, skills, anyLevel)
     classID = (ItemDB.class and ItemDB.class(id)) or classID
     sub = (ItemDB.subClass and ItemDB.subClass(id)) or sub
     local req = (ItemDB.requiredLevel and ItemDB.requiredLevel(id)) or 0
-    if req > level + 5 and not anyLevel then return nil end
+    if req > level + Gear.LEVEL_AHEAD and not anyLevel then return nil end
     local needs
     if classID == 4 then
         if sub == 6 then
@@ -226,7 +229,7 @@ function Gear.Check(id, classFile, level, skills, anyLevel)
                 if math.max(level, req) < 40 then
                     needs = ARMOR_NAMES[sub] .. " at 40"
                     req = math.max(req, 40)
-                    if req > level + 5 and not anyLevel then return nil end
+                    if req > level + Gear.LEVEL_AHEAD and not anyLevel then return nil end
                 elseif skills and not skills[ARMOR_NAMES[sub]] then
                     needs = "train " .. ARMOR_NAMES[sub]
                 end
@@ -469,7 +472,7 @@ function Gear.Candidates(opts)
         for _, inst in ipairs(L.instances) do
             local lr = inst.levelRange
             local lo, hi = lr and lr[1], lr and (lr[3] or lr[2])
-            if lo and hi and lo <= level + 5 and hi >= level then
+            if lo and hi and lo <= level + Gear.LEVEL_AHEAD and hi >= level then
                 for _, boss in ipairs(inst.bosses) do
                     for _, id in ipairs(boss.items) do
                         add(id, { kind = "boss", boss = boss, rate = boss.npcId and L.DropRate(boss.npcId, id) })
@@ -482,7 +485,7 @@ function Gear.Candidates(opts)
     if P and P.Available() and (not only or only == "ah") then
         -- Anything Questie knows with a recent auction price (BoE gear, crafted or world drops).
         for _, g in ipairs(D.gearItems) do
-            if g[2] >= level - 8 and g[2] <= level + 5 then
+            if g[2] >= level - 8 and g[2] <= level + Gear.LEVEL_AHEAD then
                 local price = P.Auction(g[1])
                 if price then add(g[1], { kind = "ah", price = price }) end
             end

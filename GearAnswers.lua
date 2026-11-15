@@ -106,7 +106,7 @@ local function answerUpgrades(slots, words)
         inLog[q.id] = true
         quests[#quests + 1] = q.id
     end
-    for _, id in ipairs(doableQuests(level + 5)) do quests[#quests + 1] = id end
+    for _, id in ipairs(doableQuests(level + G.LEVEL_AHEAD)) do quests[#quests + 1] = id end
     local only = gearSourceFilter(words)
     local candidates = G.Candidates({ classFile = classFile, level = level, quests = quests, inLog = inLog, only = only })
     if #slots > 0 then
@@ -151,7 +151,7 @@ local function answerUpgrades(slots, words)
             local places = { boss = "dungeons near your level", quest = "quests you can do", ah = "the auction house" }
             local list = only and places[only] or ("quests you can do, dungeons near your level"
                 .. (AskBot.Prices.Available() and " or the auction house" or ""))
-            say(GREY .. "  Nothing better from " .. list .. ", up to level " .. (level + 5) .. ".|r")
+            say(GREY .. "  Nothing better from " .. list .. ", up to level " .. (level + G.LEVEL_AHEAD) .. ".|r")
         end
         local firstBest
         for i = 1, math.min(#shown, AskBot.Option("maxResults") + 3) do

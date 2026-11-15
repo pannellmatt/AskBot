@@ -345,6 +345,8 @@ local function answer(question)
     if AskBot.Levelling.bestQuestsQuestion(q) then return AskBot.Levelling.answerBestQuests() end
     local nearQuest = AskBot.Levelling.questsNearSubject(q)
     if nearQuest then return AskBot.Levelling.answerQuestsNear(cleanSubject(nearQuest)) end
+    local toZone = AskBot.Levelling.questsToSubject(q)
+    if toZone then return AskBot.Levelling.answerQuestsTo(toZone) end
 
     for _, entry in ipairs(SPECIAL) do
         for _, pattern in ipairs(entry[2]) do
@@ -452,7 +454,8 @@ end
 function AskBot.IsPersonalQuestion(question)
     local q = normalize(question)
     if gearQuestion(q) or bagUpgradeQuestion(q) or trainingQuestion(q) then return true end
-    if AskBot.Levelling.bestQuestsQuestion(q) or AskBot.Levelling.questsNearSubject(q) then return true end
+    if AskBot.Levelling.bestQuestsQuestion(q) or AskBot.Levelling.questsNearSubject(q)
+        or AskBot.Levelling.questsToSubject(q) then return true end
     if personalProfession(q) then return true end
     if HEARTH_QUESTIONS[q] then return true end
     if STARTER_QUESTIONS[q] then return true end

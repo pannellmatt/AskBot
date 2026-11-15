@@ -20,6 +20,8 @@ local groupUnits = AskBot.Quests.groupUnits
 local askerClass, targetsById = Out.askerClass, Out.targetsById
 local friendlyPlaces, questXP = AskBot.Quests.friendlyPlaces, AskBot.Quests.questXP
 local resolveQuest, questObjectives = AskBot.Quests.resolveQuest, AskBot.Quests.questObjectives
+local questStatus, questForMe = AskBot.Quests.questStatus, AskBot.Quests.questForMe
+local missingSteps, forMyClass = AskBot.Quests.missingSteps, AskBot.Quests.forMyClass
 
 --------------------------------------------------------------------------------------------
 -- Levelling helper: what's next, quests near me, dungeons for my level, rares
@@ -1122,6 +1124,161 @@ local function questsNearSubject(q)
     end
 end
 
+--------------------------------------------------------------------------------------------
+-- Quests that take you somewhere: "what quests take me to Ironforge"
+--------------------------------------------------------------------------------------------
+
+local TO_PATTERNS = { "^what quests take me to (.+)$", "^which quests take me to (.+)$", "^quests that take me to (.+)$",
+    "^quests taking me to (.+)$", "^what quests send me to (.+)$", "^which quests send me to (.+)$",
+    "^quests that send me to (.+)$", "^what quests go to (.+)$", "^which quests go to (.+)$", "^quests that go to (.+)$",
+    "^any quests that take me to (.+)$", "^any quests to (.+)$", "^quests to (.+)$" }
+-- (Not "what quests are in X": that means a dungeon, "what quests are in Deadmines".)
+local function questsToSubject(q)
+    for _, pattern in ipairs(TO_PATTERNS) do
+        local s = q:match(pattern)
+        if s then return (s:gsub("^the ", "")) end
+    end
+end
+
+--- Does the zone on `uiMapId` go by `key` (a NameKey)? "ironforge", "stormwind" (City), "stv"...
+local zoneMatch = {}
+local function zoneIs(uiMapId, key)
+    local cacheKey = uiMapId .. "|" .. key
+    if zoneMatch[cacheKey] == nil then
+        local name = D.NameKey(D.ZoneName(uiMapId))
+        zoneMatch[cacheKey] = name == key or name:sub(1, #key + 1) == key .. " "
+    end
+    return zoneMatch[cacheKey]
+end
+
+--- The first spawn of `places` in a zone matching `key`, or nil.
+local function spawnIn(places, key)
+    for _, p in ipairs(places) do
+        for _, s in ipairs(p.spawns or {}) do
+            if s.uiMapId and zoneIs(s.uiMapId, key) then return p, s end
+        end
+    end
+end
+
+--- Does quest `id` take you to the zone `key`: its turn-in there, or an objective whose nearest
+--- source is there? Returns what you'd do ("hand in to X", "kill Y", "buy Z") and the spawn.
+--- Only where you'd actually go: Shiny Baubles are sold in Ironforge, but also in Kharanos.
+local function destinationIn(id, key)
+    local p, s = spawnIn(turnInPlaces(id), key)
+    if p then return "hand in to " .. GOLD .. (p.name or "?") .. "|r", s end
+    for _, obj in ipairs(questObjectives(id)) do
+        local best = #obj[3] > 0 and D.Rank(obj[3])[1]
+        if best and best.spawn and best.spawn.uiMapId and zoneIs(best.spawn.uiMapId, key) then
+            local verb = best.place.via == "sells it" and "buy" or obj[1]:lower()
+            return verb .. " " .. GOLD .. obj[2] .. "|r", best.spawn
+        end
+    end
+end
+
+--- Quests near you that will take you to the zone once open: for your race and class, not
+--- done, needing at most 2 more levels or an earlier quest. { id, why = "at 10" / "after X" }
+local SOON_LEVELS = 2
+local function comingUpTo(key, skip)
+    local level = askerLevel()
+    local inLog = {}
+    for _, q in ipairs(questLogEntries()) do inLog[q.id] = true end
+    local out = {}
+    for id, info in pairs(D.questInfo) do
+        local req = (info.req and info.req > 0) and info.req or info.level or 1
+        if not skip[id] and not inLog[id] and req <= level + SOON_LEVELS and (info.level or 0) <= level + 5
+            and forMyClass(id) and questForMe(id) then
+            local status = questStatus(id, inLog)
+            local why
+            if status == "level" then
+                why = "at " .. req
+            elseif status == "locked" then
+                local steps = missingSteps(id, inLog, {}, {}, 0)
+                local before = steps[#steps - 1] -- the quest right before this one
+                if before then why = "after " .. (QuestDB.name(before) or ("quest " .. before)) end
+            end
+            if why then
+                local givers = placesForIds(info.npcs, info.objects, true)
+                local giver = not spawnIn(givers, key) and D.Rank(givers)[1]
+                if giver and giver.dist and destinationIn(id, key) then
+                    out[#out + 1] = { id = id, why = why, time = giver.time or math.huge }
+                end
+            end
+        end
+    end
+    table.sort(out, function(x, y) return x.time < y.time end)
+    return out
+end
+
+--- Quests you have or can take (not given in that zone) whose objectives or turn-in are in a
+--- zone, then the ones near you that open up soon.
+local function answerQuestsTo(subject)
+    local key = D.NameKey(subject)
+    local found, zoneName, seen = {}, nil, {}
+    local cands = {}
+    for _, q in ipairs(questLogEntries()) do cands[#cands + 1] = { id = q.id, inLog = true } end
+    local maxLevel = askerLevel() + 5
+    for _, id in ipairs(doableQuests()) do
+        if (QuestDB.questLevel(id) or 0) <= maxLevel then cands[#cands + 1] = { id = id } end
+    end
+    for _, c in ipairs(cands) do
+        if not seen[c.id] then
+            seen[c.id] = true
+            local info = D.questInfo[c.id]
+            local givers = info and placesForIds(info.npcs, info.objects, true) or {}
+            -- New quests handed out in that zone don't take you there: you'd already be there.
+            if c.inLog or not spawnIn(givers, key) then
+                local why, s = destinationIn(c.id, key)
+                if why then
+                    zoneName = zoneName or D.ZoneName(s.uiMapId)
+                    c.why = why
+                    if not c.inLog then c.giver = D.Rank(givers)[1] end
+                    found[#found + 1] = c
+                end
+            end
+        end
+    end
+    local soon = comingUpTo(key, seen)
+    if not zoneName and soon[1] then
+        local _, s = destinationIn(soon[1].id, key)
+        zoneName = s and D.ZoneName(s.uiMapId)
+    end
+    if #found == 0 and #soon == 0 then
+        return say("None of your quests, or ones you can pick up, take you to \"" .. subject .. "\""
+            .. GREY .. " (or I don't know a zone by that name).|r")
+    end
+    if #found == 0 then
+        say("None of the quests you can pick up now take you to " .. GOLD .. (zoneName or subject) .. "|r.")
+    else
+        table.sort(found, function(x, y)
+            if x.inLog ~= y.inLog then return x.inLog == true end
+            local xt, yt = x.giver and x.giver.time, y.giver and y.giver.time
+            if xt and yt then return xt < yt end
+            return xt ~= nil
+        end)
+        say("Quests that take you to " .. GOLD .. zoneName .. "|r (" .. #found .. "):")
+        for i = 1, math.min(6, #found) do
+            local c = found[i]
+            local xp = questXP(c.id)
+            local where
+            if c.inLog then
+                where = GREY .. "in your log|r"
+            elseif c.giver then
+                where = GREY .. "from|r " .. GOLD .. c.giver.place.name .. "|r, " .. shortHow(c.giver) .. " "
+                    .. pinLink(c.giver.place, c.giver.spawn, QuestDB.name(c.id) or "quest")
+            else
+                where = GREY .. "giver unknown|r"
+            end
+            say("  " .. questLabel(c.id) .. (xp and (GREY .. " " .. xp .. "xp|r") or "") .. ": " .. c.why .. "; " .. where)
+        end
+        if #found > 6 then say(GREY .. "  ...and " .. (#found - 6) .. " more.|r") end
+    end
+    if #soon > 0 then
+        local labels = {}
+        for i, c in ipairs(soon) do labels[i] = questLabel(c.id) .. GREY .. " (" .. c.why .. ")|r" end
+        say(GREY .. "  Coming up:|r " .. joinSome(labels, 4))
+    end
+end
+
 -- For the files loaded after this one.
 Levelling.answerQuestLog, Levelling.doableQuests = answerQuestLog, doableQuests
 Levelling.answerQuestsHere, Levelling.currentZoneMap = answerQuestsHere, currentZoneMap
@@ -1134,3 +1291,4 @@ Levelling.trainingQuestion, Levelling.answerTraining = trainingQuestion, answerT
 Levelling.bestQuestsQuestion, Levelling.answerBestQuests = bestQuestsQuestion, answerBestQuests
 Levelling.questsNearSubject, Levelling.answerQuestsNear = questsNearSubject, answerQuestsNear
 Levelling.sameAreaLine = sameAreaLine
+Levelling.questsToSubject, Levelling.answerQuestsTo = questsToSubject, answerQuestsTo

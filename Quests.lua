@@ -1538,6 +1538,7 @@ for _, s in ipairs({ "quest starters", "quest starter items", "quest starting it
 -- For the files loaded after this one.
 Quests.friendlyPlaces, Quests.questXP, Quests.resolveQuest = friendlyPlaces, questXP, resolveQuest
 Quests.questObjectives = questObjectives
+Quests.questStatus, Quests.questForMe, Quests.missingSteps, Quests.forMyClass = questStatus, questForMe, missingSteps, forMyClass
 Quests.answerTarget, Quests.placesForIds, Quests.questAvailable = answerTarget, placesForIds, questAvailable
 Quests.itemName, Quests.questComplete, Quests.questPlaces = itemName, questComplete, questPlaces
 Quests.turnInPlaces, Quests.bagCount, Quests.quicker = turnInPlaces, bagCount, quicker
