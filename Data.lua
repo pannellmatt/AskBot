@@ -158,22 +158,36 @@ function D.ZoneName(uiMapId)
 end
 
 -- Dungeons by area ID (main and alternative IDs), from Questie's dungeon table.
-local dungeonByArea
-local function dungeonFor(areaId)
-    if not dungeonByArea then
-        dungeonByArea = {}
-        local ok, list = pcall(function() return ZoneDB:GetDungeons() end)
-        if ok and type(list) == "table" then
-            for id, d in pairs(list) do
-                local entry = { name = d[1], entrances = d[4] }
+-- Each entry: { name, areaId, areaIds = { main and alternatives }, entrances }.
+local dungeonByArea, dungeonNames
+local function loadDungeons()
+    if dungeonByArea then return end
+    dungeonByArea, dungeonNames = {}, {}
+    local ok, list = pcall(function() return ZoneDB:GetDungeons() end)
+    if ok and type(list) == "table" then
+        for id, d in pairs(list) do
+            if type(d) == "table" and type(d[1]) == "string" then
+                local entry = { name = d[1], areaId = id, areaIds = { id }, entrances = d[4] }
                 dungeonByArea[id] = entry
                 for _, alt in ipairs(type(d[2]) == "table" and d[2] or {}) do
                     dungeonByArea[alt] = dungeonByArea[alt] or entry
+                    entry.areaIds[#entry.areaIds + 1] = alt
                 end
+                dungeonNames[#dungeonNames + 1] = { D.NameKey(d[1]), entry, d[1] }
             end
         end
     end
+end
+
+local function dungeonFor(areaId)
+    loadDungeons()
     return dungeonByArea[areaId]
+end
+
+--- Questie's dungeons as a name list for D.FindByName: { key, entry, name }.
+function D.DungeonNames()
+    loadDungeons()
+    return dungeonNames
 end
 
 --- Spawns at a dungeon's entrance(s), each marked with the dungeon's name; nil if the area

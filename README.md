@@ -27,6 +27,7 @@ Built for **World of Warcraft: Forever**.
 - `/ab which quests should I abandon` (or `/ab tidy quest log`): grey quests, quests that need a group (elite, dungeon) and quests whose next step is far away.
 - `/ab quests here`: quests you can pick up, nearest first, grouped by who gives them and coloured by difficulty. AskBot uses Questie's own checks, so completed quests, missing prerequisites, quests for other classes and grey quests are all left out.
 - `/ab dungeons` (or `/ab dungeons for level 25`): dungeons that suit your level, with entrance pins and a link to their loot *(with AtlasLoot)*.
+- `/ab what do I need before Deadmines` (or `/ab SFK quests`, `/ab prep for Gnomeregan`): the dungeon's entrance and the quests to pick up before you go, grouped by quest giver. Quests for later levels, quests that aren't available yet (with links explaining why) and the dungeon's quests your group already has are listed too. Class quests with an objective inside count. Short names such as VC, SFK, BFD, RFK and ZF work.
 - `/ab rares`: the nearest rare and rare-elite mobs, with their levels.
 
 ### Where's the nearest...?
@@ -97,6 +98,7 @@ Ask at the auction house and AskBot checks the live price for you. Away from it,
 - `/ab where is my party` (or `where is everyone`): where each group member is, nearest first, with travel time and a pin.
 - `/ab where is Buddy`: one group member. For a guild member outside your group, the zone they're in (the game only gives addons exact positions for group members).
 - Friends can ask too: `!ask where is my party member` answers from where *they* are.
+- `/ab who has Red Linen Goods` (or `who needs …`): your progress and each group member's on a quest. Quest answers also add a "Group:" line when someone in your group has the quest. This uses Questie's party sync, so it only covers members who run Questie.
 
 You don't have to type names exactly. Lower case, missing apostrophes and partial names all work. When AskBot isn't sure what you meant, it offers clickable "Did you mean" suggestions.
 

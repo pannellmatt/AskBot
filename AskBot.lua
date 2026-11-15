@@ -536,6 +536,58 @@ local function objectiveText(o)
     return prefix .. describe(o.best, o.name, o.showLevel) .. via .. (o.community and (GREY .. " (community info)|r") or "")
 end
 
+--------------------------------------------------------------------------------------------
+-- Group quest progress, from Questie's party sync (members who run Questie share their log)
+--------------------------------------------------------------------------------------------
+
+local function questieComms()
+    local comms = QuestieLoader and QuestieLoader:ImportModule("QuestieComms")
+    return comms and comms.GetQuest and comms or nil
+end
+
+--- "2/6", "2/6 0/1", or green "ready" when every objective is done.
+local function progressText(objectives)
+    local parts, all = {}, true
+    for _, o in pairs(type(objectives) == "table" and objectives or {}) do
+        if type(o) == "table" and o.required and not o.finished then
+            all = false
+            parts[#parts + 1] = (o.fulfilled or 0) .. "/" .. o.required
+        end
+    end
+    if all then return "|cff66cc33ready|r" end
+    return table.concat(parts, " ")
+end
+
+--- Party members (by Questie's sync) who have any of the quest IDs: { { name, text } },
+--- sorted by name. Excludes you.
+local function groupQuestProgress(ids)
+    local comms = questieComms()
+    if not comms then return {} end
+    local me = UnitName("player")
+    local out, seen = {}, {}
+    for _, id in ipairs(ids) do
+        local ok, players = pcall(comms.GetQuest, comms, id)
+        for name, objectives in pairs(ok and type(players) == "table" and players or {}) do
+            local short = tostring(name):match("^([^%-]+)") or tostring(name)
+            if not seen[short] and not D.SameName(short, me) then
+                seen[short] = true
+                out[#out + 1] = { short, progressText(objectives) }
+            end
+        end
+    end
+    table.sort(out, function(a, b) return a[1] < b[1] end)
+    return out
+end
+
+--- "  Group: Buddy 2/6, Holy ready" or nil.
+local function groupLine(ids)
+    local list = groupQuestProgress(ids)
+    if #list == 0 then return nil end
+    local parts = {}
+    for i, p in ipairs(list) do parts[i] = p[1] .. " " .. p[2] end
+    return "  Group: " .. table.concat(parts, ", ")
+end
+
 local function answerQuestInLog(id, name)
     local complete, objectives, turnIn = questTasks(id)
     say("Quest " .. GOLD .. name .. "|r " .. (complete and "is complete:" or "is in progress:"))
@@ -555,6 +607,8 @@ local function answerQuestInLog(id, name)
     else
         say("  Turn in: " .. GREY .. "Questie doesn't know where.|r")
     end
+    local group = groupLine({ id })
+    if group then say(group) end
 
     local target = (complete or not nearest) and turnIn or nearest
     if target then autoPin(target.place, target.spawn, name) end
@@ -615,6 +669,10 @@ local function answerQuest(query, mode, questIds)
         end
     end
     if #quests > 3 then say(GREY .. "  ...plus " .. (#quests - 3) .. " more quests with that name.|r") end
+    local ids = {}
+    for i, e in ipairs(quests) do ids[i] = e[2] end
+    local group = groupLine(ids)
+    if group then say(group) end
     didYouMean(others, finish and "who do i turn in %s to" or "who gives %s")
     pinBest(firstBest, finish and "turn in" or "quest")
 end
@@ -2302,7 +2360,268 @@ end
 -- Understanding the question
 --------------------------------------------------------------------------------------------
 
+--------------------------------------------------------------------------------------------
+-- Dungeon prep: "what do I need before Deadmines"
+--------------------------------------------------------------------------------------------
+
+-- Short names players use, as one or more name searches (first found wins).
+local DUNGEON_ALIASES = {
+    rfc = { "ragefire chasm" }, wc = { "wailing caverns" }, vc = { "deadmines" }, dm = { "deadmines" },
+    sfk = { "shadowfang keep" }, stocks = { "stockade" }, stockades = { "stockade" }, bfd = { "blackfathom deeps" },
+    gnomer = { "gnomeregan" }, rfk = { "razorfen kraul" }, sm = { "scarlet monastery" }, rfd = { "razorfen downs" },
+    ulda = { "uldaman" }, zf = { "zulfarrak" }, mara = { "maraudon" }, st = { "sunken temple", "atalhakkar" },
+    ["sunken temple"] = { "sunken temple", "atalhakkar" }, brd = { "blackrock depths" }, lbrs = { "blackrock spire" },
+    ubrs = { "blackrock spire" }, strat = { "stratholme" }, scholo = { "scholomance" },
+}
+
+--- A dungeon from Questie's table by name or short name. `exactOnly`: the whole name
+--- (with or without "The") or a short name, nothing partial.
+local function findDungeon(subject, exactOnly)
+    local key = D.NameKey(subject):gsub("^the ", ""):gsub(" dungeon$", ""):gsub(" instance$", "")
+    local list = D.DungeonNames()
+    for _, cand in ipairs(DUNGEON_ALIASES[key] or { key }) do
+        for _, e in ipairs(list) do
+            if e[1] == cand or e[1] == "the " .. cand then return e[2] end
+        end
+    end
+    if exactOnly then return nil end
+    for _, cand in ipairs(DUNGEON_ALIASES[key] or { key }) do
+        local hits = D.FindByName(list, cand)
+        if hits then return hits[1][2] end
+    end
+end
+
+local CLASS_IDS = { WARRIOR = 1, PALADIN = 2, HUNTER = 3, ROGUE = 4, PRIEST = 5, DEATHKNIGHT = 6, SHAMAN = 7,
+    MAGE = 8, WARLOCK = 9, MONK = 10, DRUID = 11 }
+
+--- Is the quest open to your class? (Questie's requiredClasses is a class bit mask.)
+local function forMyClass(id)
+    local mask = QuestDB.requiredClasses and QuestDB.requiredClasses(id)
+    if not mask or mask == 0 then return true end
+    local classId = CLASS_IDS[select(2, UnitClass("player")) or ""]
+    return not classId or D.HasBit(mask, 2 ^ (classId - 1))
+end
+
+--- Does the quest belong to the dungeon? Questie files dungeon quests under the dungeon's
+--- area; class quests are filed under the class, so for those, an objective inside counts.
+local function questInDungeon(id, areas)
+    local zone = QuestDB.zoneOrSort and QuestDB.zoneOrSort(id)
+    if zone and areas[zone] then return true end
+    local classes = QuestDB.requiredClasses and QuestDB.requiredClasses(id)
+    if not classes or classes == 0 then return false end
+    local function inside(npc)
+        local spawns = NpcDB.spawns(npc)
+        for area in pairs(type(spawns) == "table" and spawns or {}) do
+            if areas[area] then return true end
+        end
+        return false
+    end
+    local o = QuestDB.objectives(id) or {}
+    for _, c in ipairs(o[1] or {}) do
+        if inside(c[1]) then return true end
+    end
+    for _, c in ipairs(o[3] or {}) do
+        for _, npc in ipairs(ItemDB.npcDrops(c[1]) or {}) do
+            if inside(npc) then return true end
+        end
+    end
+    for _, c in ipairs(o[5] or {}) do
+        for _, npc in ipairs(type(c[1]) == "table" and c[1] or {}) do
+            if inside(npc) then return true end
+        end
+    end
+    return false
+end
+
+--- "The Deadmines (lvl 10-26): entrance ~3 min [pin] [loot]", then the dungeon's quests you
+--- haven't done: in your log, to pick up first (with givers), for later levels, and those
+--- not available yet (links to what they need).
+local function answerDungeonPrep(d)
+    if AskBot.asker then return say("That depends on which quests you've done, so it needs your own AskBot.") end
+    if not d.quests then
+        local areas = {}
+        for _, a in ipairs(d.areaIds) do areas[a] = true end
+        d.quests = {}
+        for id in pairs(D.questInfo) do
+            if questInDungeon(id, areas) then d.quests[#d.quests + 1] = id end
+        end
+        table.sort(d.quests, function(a, b) return (QuestDB.questLevel(a) or 0) < (QuestDB.questLevel(b) or 0) end)
+    end
+
+    local inLog = {}
+    for _, q in ipairs(questLogEntries()) do inLog[q.id] = true end
+    local byStatus, done = { inLog = {}, ready = {}, level = {}, locked = {} }, 0
+    for _, id in ipairs(d.quests) do
+        if questForMe(id) and forMyClass(id) then
+            local status = questStatus(id, inLog)
+            if status == "done" then done = done + 1 else table.insert(byStatus[status], id) end
+        end
+    end
+
+    -- Heading: level range (AtlasLoot), entrance, loot link.
+    local inst
+    if AskBot.Loot.status == "ready" then
+        for _, i in ipairs(AskBot.Loot.instances) do
+            for _, a in ipairs(d.areaIds) do
+                if i.areaId == a then inst = i end
+            end
+        end
+    end
+    local range = inst and inst.levelRange
+    local heading = GOLD .. d.name .. "|r" .. (range and range[1] and (" (lvl " .. range[1] .. "-" .. range[#range] .. ")") or "")
+    local spawns = D.DungeonEntranceSpawns(d.areaId)
+    local entrance = spawns and D.Rank({ { kind = "entrance", name = d.name .. " entrance", spawns = spawns } })[1]
+    if entrance then
+        heading = heading .. ": entrance " .. shortHow(entrance) .. " " .. pinLink(entrance.place, entrance.spawn, d.name)
+    end
+    if inst then
+        local i = inst
+        heading = heading .. " " .. makeLink("loot", function() AskBot.Ask("what does " .. i.name .. " drop") end)
+    end
+    say(heading)
+
+    local open = #byStatus.inLog + #byStatus.ready + #byStatus.level + #byStatus.locked
+    if open == 0 then
+        say("  " .. (done > 0 and ("You've done all " .. done .. " of its quests for you.")
+            or "Questie knows no quests for you there."))
+    end
+    if #byStatus.inLog > 0 then
+        local labels = {}
+        for i, id in ipairs(byStatus.inLog) do labels[i] = questLabel(id) end
+        say("  In your log: " .. joinSome(labels, 4))
+    end
+    -- Quests to pick up, one line per giver, nearest giver first.
+    local givers, byGiver = {}, {}
+    for _, id in ipairs(byStatus.ready) do
+        local by = QuestDB.startedBy(id) or {}
+        local r = D.Rank(placesForIds(by[1], by[2], true))[1]
+        local key = r and (r.place.kind .. r.place.id) or ("quest" .. id)
+        local g = byGiver[key]
+        if not g then
+            g = { r = r, quests = {}, id = id }
+            byGiver[key] = g
+            givers[#givers + 1] = g
+        end
+        g.quests[#g.quests + 1] = questLabel(id)
+    end
+    table.sort(givers, function(a, b)
+        if a.r and b.r then return quicker(a.r, b.r) end
+        return a.r ~= nil
+    end)
+    local firstGiver = givers[1] and givers[1].r
+    for i, g in ipairs(givers) do
+        if i > 4 then say(GREY .. "  +" .. (#givers - 4) .. " more quest givers|r"); break end
+        local from = g.r and (GOLD .. g.r.place.name .. "|r, " .. shortHow(g.r) .. " " .. pinLink(g.r.place, g.r.spawn, g.r.place.name))
+            or (giverText(g.id))
+        say("  Pick up from " .. from .. ": " .. joinSome(g.quests, 3))
+    end
+    if #byStatus.level > 0 then
+        local labels = {}
+        for i, id in ipairs(byStatus.level) do
+            labels[i] = questLabel(id) .. GREY .. " (needs " .. (QuestDB.requiredLevel(id) or "?") .. ")|r"
+        end
+        say("  Later: " .. joinSome(labels, 3))
+    end
+    if #byStatus.locked > 0 then
+        local links = {}
+        for i, id in ipairs(byStatus.locked) do
+            local name = QuestDB.name(id) or ("quest " .. id)
+            links[i] = makeLink(name, function() AskBot.Ask("what do i need before " .. name) end)
+        end
+        say("  Not available yet: " .. joinSome(links, 3))
+    end
+    -- Dungeon quests your group has (they may be able to share them).
+    local groupHas = {}
+    for _, id in ipairs(d.quests) do
+        if questForMe(id) then
+            local names = {}
+            for _, p in ipairs(groupQuestProgress({ id })) do names[#names + 1] = p[1] end
+            if #names > 0 then groupHas[#groupHas + 1] = questLabel(id) .. GREY .. " (" .. table.concat(names, ", ") .. ")|r" end
+        end
+    end
+    if #groupHas > 0 then say("  Group has: " .. joinSome(groupHas, 3)) end
+    local pin = firstGiver or entrance
+    if pin then autoPin(pin.place, pin.spawn, pin.place.name) end
+end
+
+--- Your own progress on a quest: "ready", "2/6", "done" or "not taken".
+local function myQuestProgress(id)
+    if questComplete(id) then return "|cff66cc33ready|r" end
+    if questInLog(id) then
+        local list = {}
+        for i, o in ipairs(C_QuestLog.GetQuestObjectives and C_QuestLog.GetQuestObjectives(id) or {}) do
+            list[i] = { fulfilled = o.numFulfilled, required = o.numRequired, finished = o.finished }
+        end
+        local text = progressText(list)
+        return text ~= "|cff66cc33ready|r" and text or "in log"
+    end
+    local isCompleted = (C_QuestLog and C_QuestLog.IsQuestFlaggedCompleted) or IsQuestFlaggedCompleted
+    if isCompleted and isCompleted(id) then return GREY .. "done|r" end
+    return GREY .. "not taken|r"
+end
+
+--- "Who has Red Linen Goods?": you and each group member, from Questie's party sync.
+local function answerWhoHas(query, questId)
+    local ids, name = {}, nil
+    if questId then
+        ids[1], name = questId, QuestDB.name(questId)
+    else
+        local hits = D.FindByName(D.questNames, query)
+        for _, e in ipairs(hits or {}) do
+            if questAvailable(e[2]) then ids[#ids + 1] = e[2]; name = e[3] end
+        end
+    end
+    if #ids == 0 then return say("I couldn't find a quest called \"" .. tostring(query) .. "\".") end
+
+    local parts = {}
+    if not AskBot.asker then
+        local mine = GREY .. "not taken|r"
+        for _, id in ipairs(ids) do
+            local p = myQuestProgress(id)
+            if p ~= GREY .. "not taken|r" then mine = p end
+        end
+        parts[1] = "you " .. mine
+    end
+    local have = {}
+    for _, p in ipairs(groupQuestProgress(ids)) do
+        parts[#parts + 1] = p[1] .. " " .. p[2]
+        have[p[1]] = true
+    end
+
+    -- Group members not listed: either they don't have it, or Questie has no data from them.
+    local comms = questieComms()
+    local known = comms and comms.remotePlayerClasses or {}
+    local noData = {}
+    for _, unit in ipairs(groupUnits()) do
+        local n = unit ~= "player" and UnitName(unit)
+        if n and not have[n] then
+            local synced = false
+            for k in pairs(known) do
+                if D.SameName(tostring(k), n) then synced = true; break end
+            end
+            if synced then parts[#parts + 1] = n .. " " .. GREY .. "not taken|r" else noData[#noData + 1] = n end
+        end
+    end
+
+    say(questLabel(ids[1], name) .. ": " .. table.concat(parts, ", "))
+    if #noData > 0 then
+        say(GREY .. "  (No Questie party data from " .. table.concat(noData, ", ") .. ".)|r")
+    elseif not (IsInGroup and IsInGroup()) then
+        say(GREY .. "  (You're not in a group.)|r")
+    end
+end
+
 local INTENTS = {
+    { "whoHas", {
+        "^who has (.+)$", "^who needs (.+)$", "^who else has (.+)$", "^who else needs (.+)$",
+        "^who in my group has (.+)$", "^who in my group needs (.+)$", "^who in the group has (.+)$",
+        "^who is on (.+)$", "^who is doing (.+)$", "^does anyone have (.+)$", "^does anyone need (.+)$",
+        "^group progress for (.+)$", "^group progress on (.+)$", "^party progress for (.+)$" } },
+    { "prep", {
+        "^prep for (.+)$", "^prepare for (.+)$", "^preparing for (.+)$", "^get ready for (.+)$", "^ready for (.+)$",
+        "^am i ready for (.+)$", "^(.+) prep$", "^quests for (.+)$", "^quests in (.+)$", "^what quests are in (.+)$",
+        "^what quests are there for (.+)$", "^what quests for (.+)$", "^which quests for (.+)$",
+        "^dungeon quests for (.+)$", "^(.+) quests$" } },
     { "chain", {
         "^how do i unlock (.+)$", "^how to unlock (.+)$", "^how do i get to (.+)$", "^unlock (.+)$",
         "^why cant i get (.+)$", "^why can i not get (.+)$", "^why dont i have (.+)$", "^what do i need for (.+)$",
@@ -2485,6 +2804,7 @@ local function answer(question)
     end
 
     if questId then
+        if intent == "whoHas" then return answerWhoHas(nil, tonumber(questId)) end
         if intent == "chain" then return answerChain(nil, tonumber(questId)) end
         if intent == "after" then return answerAfter(nil, tonumber(questId)) end
         return answerQuest(nil, intent == "questEnd" and "end" or intent == "questStart" and "start" or "auto", { tonumber(questId) })
@@ -2532,6 +2852,15 @@ local function answer(question)
     local person = q:match("^where is (.+)$") or q:match("^where are (.+)$") or q:match("^find (.+)$")
         or q:match("^locate (.+)$")
     if person and answerPerson(person) then return end
+
+    -- "what do I need before Deadmines", "SFK quests": a dungeon. Quest chains need the
+    -- dungeon's whole name or short name; anything else is a quest.
+    if intent == "whoHas" then return answerWhoHas(subject) end
+    if intent == "prep" or intent == "chain" then
+        local d = findDungeon(subject, intent == "chain")
+        if d then return answerDungeonPrep(d) end
+        if intent == "prep" then intent = nil end
+    end
 
     if intent == "gather" or intent == "get" then
         -- "where can I mine copper", "where do I get Peacebloom": a gathering node beats the
@@ -2718,6 +3047,7 @@ local function help()
     say("  /askbot where is Gryan Stoutmantle    /askbot [shift-click an item or quest]")
     say("  /askbot what does VanCleef drop    /askbot Deadmines loot    /askbot price of Linen Cloth")
     say("  /askbot what do I need before [quest]    /askbot what comes after [quest]")
+    say("  /askbot what do I need before Deadmines    /askbot who has [quest]")
     say("  /askbot where can I mine copper    /askbot Peacebloom    /askbot where should I mine")
     say("  /askbot upgrades    /askbot upgrades legs    /askbot what gear should I get as a feral druid")
     say("  /askbot where is my party    /askbot where is <name>")

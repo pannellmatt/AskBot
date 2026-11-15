@@ -185,6 +185,14 @@ local quests = {
     [121] = { "Darkshore Task 2", 1, { { 23 } }, { { 23 } }, 20, 15 },
     [122] = { "Darkshore Task 3", 1, { { 23 } }, { { 23 } }, 21, 15 },
     [125] = { "Far Errand", 1, { { 22 } }, { { 22 } }, 20, 15 },         -- handed in on Teldrassil
+    -- Deadmines quests (filed under the dungeon, area 1581), given in Stormwind so they don't
+    -- change the Westfall counts; only doable during the dungeon prep test.
+    [142] = { "Red Silk Bandanas", 1, { { 6 } }, { { 6 } }, 17, 14 },
+    [143] = { "Oh Brother", 1, { { 6 } }, { { 6 } }, 20, 15 },             -- after 142
+    [144] = { "Underground Assault", 1, { { 6 } }, { { 6 } }, 24, 22 },    -- needs level 22
+    [145] = { "Test of Righteousness", 1, { { 6 } }, { { 6 } }, 22, 20,   -- paladin: lumber from inside
+        { nil, nil, { { 6994 } } } },
+    [146] = { "Warrior Errand", 1, { { 6 } }, { { 6 } }, 20, 18, { { { 641 } } } }, -- warrior: kill inside
     [130] = { "Chain Part 1", 1, { { 25 } }, { { 25 } }, 14, 10 },
     [131] = { "Chain Part 2", 1, { { 25 } }, { { 25 } }, 16, 12 },
     [132] = { "Chain Part 3", 1, { { 25 } }, { { 25 } }, 18, 15 },
@@ -212,8 +220,8 @@ local doable = { [102] = true, [105] = true, [106] = true, [107] = true, [109] =
 local questLog = {
     [100] = { complete = true, objectives = {} },
     [103] = { complete = false, objectives = {
-        { text = "Defias Thug slain: 10/10", finished = true },
-        { text = "Linen Cloth: 2/6", finished = false } } },
+        { text = "Defias Thug slain: 10/10", finished = true, numFulfilled = 10, numRequired = 10 },
+        { text = "Linen Cloth: 2/6", finished = false, numFulfilled = 2, numRequired = 6 } } },
     [104] = { complete = false, objectives = { { text = "Scout the Redridge camp", finished = false } } },
 }
 -- Quest chains: 132 needs all of {131, 133}; 131 needs any one of {130, 134 (Horde only)};
@@ -221,7 +229,10 @@ local questLog = {
 local chain = {
     [131] = { single = { 130, 134 } }, [132] = { group = { 131, 133 }, crumbs = { 137 } },
     [136] = { single = { 135 } }, [130] = { nextQuest = 131 },
+    [143] = { single = { 142 } },
 }
+local questZone = { [142] = 1581, [143] = 1581, [144] = 1581 }
+local questClasses = { [145] = 2, [146] = 1 } -- paladin, warrior
 local completed = { [135] = true }
 C_QuestLog = {
     IsQuestFlaggedCompleted = function(id) return completed[id] == true end,
@@ -298,6 +309,8 @@ QuestDB = {
     preQuestGroup = function(id) return chain[id] and chain[id].group end,
     nextQuestInChain = function(id) return chain[id] and chain[id].nextQuest end,
     breadcrumbs = function(id) return chain[id] and chain[id].crumbs end,
+    zoneOrSort = function(id) return questZone[id] end,
+    requiredClasses = function(id) return questClasses[id] end,
 }
 ItemDB = { GetAllIds = function() return ids(items) end }
 for _, field in ipairs({ "name", "npcDrops", "objectDrops", "vendors", "questRewards", "itemDrops" }) do
@@ -322,7 +335,11 @@ LibQuestieDB = {
     },
 }
 Questie = { started = true }
+-- Questie's party sync: quest id -> { player name -> objectives }, and players who sent data
+local remoteLogs, remoteClasses = {}, {}
 QuestieLoader = { ImportModule = function() return {
+    GetQuest = function(_, id) return remoteLogs[id] end,
+    remotePlayerClasses = remoteClasses,
     IsDoable = function(id) return doable[id] == true end,
     IsTrivial = function(level) return level ~= nil and level < 20 - 8 end,
     GetUiMapIdByAreaId = function(_, a) return areaToMap[a] end,
@@ -659,6 +676,18 @@ ask("where should i quest next?", { "Where to quest at level 20:", "Redridge Mou
 ask("dungeons", { "Dungeons for level 20:", "The Deadmines|r (10-26)", "[loot]", "entrance Westfall 42.6, 71.8" },
     { "Blackrock Depths" })
 ask("dungeons for level 55", "Blackrock Depths|r (48-60)", { "Deadmines" })
+
+-- Dungeon prep: the Deadmines' quests for a level 20 warrior. 142 to pick up, 143 after it,
+-- 144 at level 22, the warrior quest (objective inside) yes, the paladin one no.
+doable[142], doable[146] = true, true
+ask("what do i need before deadmines", { "The Deadmines|r (lvl 10-26): entrance 230 yds", "[loot]",
+    "Pick up from |cffffd100Ander Germaine|r, ~2 min flying", "Red Silk Bandanas",
+    "[20] Warrior Errand", "Later: ", "Underground Assault|r|cffaaaaaa (needs 22)",
+    "Not available yet: |cff71d5ff|Haddon:askbot:" }, { "Test of Righteousness", "Bounty on Murlocs" })
+ask("vc quests", "The Deadmines|r (lvl 10-26)")
+ask("prep for the deadmines", "Red Silk Bandanas")
+ask("what do i need before oh brother", { "Red Silk Bandanas" }, { "entrance" }) -- a quest, not the dungeon
+doable[142], doable[146] = nil, nil
 ask("rares near me", { "Rare mobs nearest you:", "Leprithus|r lvl 19 |cffc0c0c0(rare)", "Foreman Grills", "(rare elite)" })
 
 -- Another continent, two boats: Westfall > Stormwind > Auberdine > Rut'theran
@@ -902,6 +931,18 @@ expectChat("party: a question AskBot doesn't know", function()
     fire("CHAT_MSG_PARTY", "!ask what is the meaning of life", "Buddy")
 end, { "Try !ask help" }, { "/askbot help" })
 advance(10)
+-- Group quest progress, from Questie's party sync
+ask("who has red linen goods", { "Red Linen Goods|r: you 2/6", "(No Questie party data from Buddy.)" }, { "Buddy " })
+remoteLogs[103] = { ["Buddy-Realm"] = { { fulfilled = 10, required = 10, finished = true },
+    { fulfilled = 3, required = 6, finished = false } } }
+remoteLogs[142] = { Buddy = { { fulfilled = 1, required = 1, finished = true } } }
+remoteClasses.Buddy = "HUNTER"
+ask("who has red linen goods", "Red Linen Goods|r: you 2/6, Buddy 3/6", { "No Questie" })
+ask("who needs bounty on murlocs", "you |cffaaaaaanot taken|r, Buddy |cffaaaaaanot taken")
+ask("red linen goods", "  Group: Buddy 3/6")
+ask("who gives red silk bandanas", "  Group: Buddy |cff66cc33ready")
+ask("deadmines quests", "Group has: |cffffd100[17] Red Silk Bandanas|r|cffaaaaaa (Buddy)")
+remoteLogs[103], remoteLogs[142], remoteClasses.Buddy = nil, nil, nil
 inGroup = false
 ask("where is my party", "You're not in a group.")
 ask("where is guildie", { "Guildie|r (level 20 Mage) is in Stormwind City", "guild roster" })
