@@ -905,6 +905,45 @@ ask("is " .. link(9022) .. " an upgrade as healer", "not an upgrade for Arms War
 -- "/ab target"
 ask("target", "Target something first")
 
+-- Class training ---------------------------------------------------------------------------
+-- Ander Germaine's window (Warrior Trainer, NPC 6): two spells learned, two ready at 20, two later
+ask("what skills can i learn", { "Open your class trainer once", "Warrior trainer: ", "Ander Germaine" })
+local trainerList = {
+    { "Arms", nil, "header", true },
+    { "Rend", "Rank 3", "available", nil, 20, 1800 },
+    { "Hamstring", "Rank 1", "available", nil, 8, 200 },
+    { "Rend", "Rank 4", "unavailable", nil, 30, 6000 },
+    { "Mocking Blow", "Rank 2", "unavailable", nil, 30, 6000 },
+    { "Overpower", "Rank 2", "unavailable", nil, 28, 5000 },
+}
+local realGuid = UnitGUID
+function IsTradeskillTrainer() return false end
+function GetNumTrainerServices() return #trainerList end
+function GetTrainerServiceInfo(i) local s = trainerList[i]; return s[1], s[2], s[3], s[4] end
+function GetTrainerServiceLevelReq(i) return trainerList[i][5] end
+function GetTrainerServiceCost(i) return trainerList[i][6] end
+function GetTrainerServiceTypeFilter(kind) return kind ~= "used" end
+UnitGUID = function(u) if u == "npc" then return "Creature-0-1-1-1-6-0000" end return realGuid(u) end
+fire("TRAINER_SHOW")
+advance(1)
+ask("what skills can i learn right now", { "Ready to train (2): |cffffd100Hamstring|r 1, |cffffd100Rend|r 3", " - 20s",
+    "Warrior trainer: |cffffd100Ander Germaine", "Next at level 28:|r |cffffd100Overpower|r 2" }, { "Rank 4", "Mocking" })
+-- Hamstring learned: it leaves the list
+table.remove(trainerList, 3)
+fire("TRAINER_UPDATE")
+advance(1)
+ask("what can i train", { "Ready to train (1): |cffffd100Rend|r 3", " - 18s" }, { "Hamstring" })
+-- A profession or service named means that, not class spells
+ask("where can i learn skinning skills", "Skinning trainer", { "Ready to train" })
+-- A pet trainer's window isn't recorded
+UnitGUID = function(u) if u == "npc" then return "Creature-0-1-1-1-3-0000" end return realGuid(u) end
+trainerList = { { "Growl", "Rank 2", "available", nil, 10, 100 } }
+fire("TRAINER_SHOW")
+advance(1)
+ask("spells i can learn", "Ready to train (1): |cffffd100Rend|r 3", { "Growl" })
+UnitGUID = realGuid
+GetNumTrainerServices = nil
+
 -- Professions -------------------------------------------------------------------------------
 -- Your Tailoring window (75/75): pants are orange, the bag yellow, bolts grey.
 for id, name in pairs({ [2996] = "Bolt of Linen Cloth", [4238] = "Linen Bag", [4343] = "Brown Linen Pants",

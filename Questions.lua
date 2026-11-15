@@ -22,6 +22,7 @@ local answerTidy, answerHandInRoute = AskBot.Levelling.answerTidy, AskBot.Levell
 local answerRares, answerGroup = AskBot.Levelling.answerRares, AskBot.Levelling.answerGroup
 local answerPerson, HEARTH_QUESTIONS = AskBot.Levelling.answerPerson, AskBot.Levelling.HEARTH_QUESTIONS
 local answerHearth = AskBot.Levelling.answerHearth
+local trainingQuestion, answerTraining = AskBot.Levelling.trainingQuestion, AskBot.Levelling.answerTraining
 local wordSet, gearQuestion = AskBot.GearAnswers.wordSet, AskBot.GearAnswers.gearQuestion
 local answerUpgrades, answerIsUpgrade = AskBot.GearAnswers.answerUpgrades, AskBot.GearAnswers.answerIsUpgrade
 local isGear, asksUpgrade = AskBot.GearAnswers.isGear, AskBot.GearAnswers.asksUpgrade
@@ -217,6 +218,29 @@ end
 
 local NPC_PREFIXES = { "where is ", "where are ", "who is ", "find ", "where can i find ", "where do i find " }
 
+-- Answers for each SPECIAL entry, given the pattern's capture and the question. (A table, not
+-- an if-chain in answer(): Lua allows a function at most 60 upvalues.)
+local SPECIAL_ANSWERS = {
+    group = function() return answerGroup() end,
+    mineBest = function() return answerGatherBest("Mining") end,
+    herbBest = function() return answerGatherBest("Herbalism") end,
+    next = function() return answerPlan() end,
+    questLog = function() return answerQuestLog() end,
+    handIn = function() return answerHandInRoute() end,
+    tidy = function() return answerTidy() end,
+    questNext = function() return answerWhereToQuest() end,
+    questsHere = function()
+        local r = answerQuestsHere()
+        if r then autoPin(r.place, r.spawn, "quests") end
+    end,
+    zones = function(arg, q)
+        local r = answerZones(tonumber(arg), nil, nil, q:find("debug") ~= nil)
+        if r then autoPin(r.place, r.spawn, "quests") end
+    end,
+    dungeons = function(arg) return answerDungeons(tonumber(arg)) end,
+    rares = function() return answerRares() end,
+}
+
 local function answer(question)
     -- Shift-clicked item or quest links carry their IDs.
     local itemId = question:match("|Hitem:(%d+)")
@@ -269,6 +293,12 @@ local function answer(question)
             .. GREY .. ". Click one to pin it; /ab clear removes them.|r")
     end
 
+    -- "what skills can I learn": class spells (unless it names a profession or service).
+    if trainingQuestion(q) then
+        local t = findTarget(q)
+        if not t or t.id == askerClass() then return answerTraining() end
+    end
+
     -- Professions: "mats for Linen Bag", "recipe for X", "how do I level tailoring"
     if professionQuestion(q, function() return findTarget(q) ~= nil end) then return end
 
@@ -313,28 +343,8 @@ local function answer(question)
     for _, entry in ipairs(SPECIAL) do
         for _, pattern in ipairs(entry[2]) do
             local found, _, arg = q:find(pattern)
-            if found then
-                if entry[1] == "group" then return answerGroup() end
-                if entry[1] == "mineBest" then return answerGatherBest("Mining") end
-                if entry[1] == "herbBest" then return answerGatherBest("Herbalism") end
-                if entry[1] == "next" then return answerPlan() end
-                if entry[1] == "questLog" then return answerQuestLog() end
-                if entry[1] == "handIn" then return answerHandInRoute() end
-                if entry[1] == "tidy" then return answerTidy() end
-                if entry[1] == "questNext" then return answerWhereToQuest() end
-                if entry[1] == "questsHere" then
-                    local r = answerQuestsHere()
-                    if r then autoPin(r.place, r.spawn, "quests") end
-                    return
-                end
-                if entry[1] == "zones" then
-                    local r = answerZones(tonumber(arg), nil, nil, q:find("debug") ~= nil)
-                    if r then autoPin(r.place, r.spawn, "quests") end
-                    return
-                end
-                if entry[1] == "dungeons" then return answerDungeons(tonumber(arg)) end
-                if entry[1] == "rares" then return answerRares() end
-            end
+            local handler = found and SPECIAL_ANSWERS[entry[1]]
+            if handler then return handler(arg, q) end
         end
     end
 
@@ -435,7 +445,7 @@ end
 --- Questions only the asker's own AskBot can answer (they need their quest log or gear).
 function AskBot.IsPersonalQuestion(question)
     local q = normalize(question)
-    if gearQuestion(q) or bagUpgradeQuestion(q) then return true end
+    if gearQuestion(q) or bagUpgradeQuestion(q) or trainingQuestion(q) then return true end
     if personalProfession(q) then return true end
     if HEARTH_QUESTIONS[q] then return true end
     if STARTER_QUESTIONS[q] then return true end

@@ -1522,6 +1522,7 @@ for _, s in ipairs({ "quest starters", "quest starter items", "quest starting it
     "starter items", "items that start a quest" }) do STARTER_QUESTIONS[s] = true end
 
 -- For the files loaded after this one.
+Quests.friendlyPlaces = friendlyPlaces
 Quests.answerTarget, Quests.placesForIds, Quests.questAvailable = answerTarget, placesForIds, questAvailable
 Quests.itemName, Quests.questComplete, Quests.questPlaces = itemName, questComplete, questPlaces
 Quests.turnInPlaces, Quests.bagCount, Quests.quicker = turnInPlaces, bagCount, quicker

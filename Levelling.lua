@@ -1,6 +1,6 @@
 -- Levelling.lua
 -- Levelling answers: what to do next, quests here, zones, dungeons, rares, quest log tidy-up,
--- hand-in route, where your group is, and the hearthstone.
+-- hand-in route, where your group is, the hearthstone, and class spells to train.
 
 local _, AskBot = ...
 local D = AskBot.Data
@@ -17,6 +17,8 @@ local objectiveText, lootUnavailable = AskBot.Quests.objectiveText, AskBot.Quest
 local questLogEntries, questLabel = AskBot.Quests.questLogEntries, AskBot.Quests.questLabel
 local questGivers, joinSome = AskBot.Quests.questGivers, AskBot.Quests.joinSome
 local groupUnits = AskBot.Quests.groupUnits
+local askerClass, targetsById = Out.askerClass, Out.targetsById
+local friendlyPlaces = AskBot.Quests.friendlyPlaces
 
 --------------------------------------------------------------------------------------------
 -- Levelling helper: what's next, quests near me, dungeons for my level, rares
@@ -732,6 +734,146 @@ local function answerHearth()
         .. GREY .. ". Travel times use it when it's ready and saves a minute or more.|r")
 end
 
+--------------------------------------------------------------------------------------------
+-- Class training: "/ab skills I can learn", from the class trainer's window
+--------------------------------------------------------------------------------------------
+
+-- AskBotCharDB.training = { seen = time, spells = { ["Rend|Rank 2"] = { name, rank, level, cost, used } } }
+local function trainingKey(name, rank) return name .. "|" .. (rank or "") end
+
+--- Is the open trainer window your class trainer (not a profession, pet or weapon trainer)?
+local function isClassTrainerWindow()
+    if IsTradeskillTrainer and IsTradeskillTrainer() then return false end
+    local guid = UnitGUID and UnitGUID("npc")
+    local npcId = guid and tonumber(guid:match("^Creature%-%d+%-%d+%-%d+%-%d+%-(%d+)"))
+    local sub = npcId and NpcDB.subName(npcId)
+    if not sub then return true end -- a trainer Questie doesn't know
+    local t = targetsById[askerClass()]
+    return t ~= nil and t.test(sub:lower(), function() return true end)
+end
+
+--- Reads the open class trainer window into AskBotCharDB.training, merged with earlier visits.
+local function recordTraining()
+    if not (GetNumTrainerServices and GetTrainerServiceInfo) or not isClassTrainerWindow() then return end
+    AskBotCharDB = AskBotCharDB or {}
+    local t = AskBotCharDB.training or { spells = {} }
+    AskBotCharDB.training = t
+    local visible, collapsed = {}, false
+    for i = 1, (GetNumTrainerServices() or 0) do
+        local name, rank, category, expanded = GetTrainerServiceInfo(i)
+        if category == "header" then
+            if not expanded then collapsed = true end
+        elseif name and category then
+            local key = trainingKey(name, rank ~= "" and rank or nil)
+            visible[key] = true
+            local e = t.spells[key] or {}
+            e.name, e.rank = name, (rank ~= "" and rank) or nil
+            e.level = (GetTrainerServiceLevelReq and GetTrainerServiceLevelReq(i)) or e.level
+            e.cost = (GetTrainerServiceCost and GetTrainerServiceCost(i)) or e.cost
+            e.used = category == "used"
+            t.spells[key] = e
+        end
+    end
+    -- Learned spells leave the list while the "used" filter is off (the default), so anything
+    -- missing from a full list of unlearned spells has been learned.
+    local filter = GetTrainerServiceTypeFilter
+    local unlearnedShown = not filter or (filter("available") and filter("unavailable"))
+    if next(visible) and not collapsed and unlearnedShown and not (filter and filter("used")) then
+        for key, e in pairs(t.spells) do
+            if not visible[key] then e.used = true end
+        end
+    end
+    t.seen = time and time() or 0
+end
+
+--- A spell was learned (LEARNED_SPELL_IN_TAB): tick it off.
+local function learnedSpell(spellId)
+    local t = AskBotCharDB and AskBotCharDB.training
+    if not t or not spellId then return end
+    local name = (C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellId))
+        or (GetSpellInfo and GetSpellInfo(spellId))
+    local rank = (C_Spell and C_Spell.GetSpellSubtext and C_Spell.GetSpellSubtext(spellId))
+        or (GetSpellSubtext and GetSpellSubtext(spellId))
+    local e = name and t.spells[trainingKey(name, rank ~= "" and rank or nil)]
+    if e then e.used = true end
+end
+
+--- "what skills can I learn", "spells I can train", "what can I train".
+local TRAIN_NOUNS = { skill = true, skills = true, spell = true, spells = true, ability = true, abilities = true,
+    rank = true, ranks = true }
+local function trainingQuestion(q)
+    if q == "train" or q == "training" or q:find("^what can i train") or q:find("^what can i learn")
+        or q:find("^what should i train") or q:find("^new spells") or q:find("^new skills") or q:find("^new abilities") then
+        return true
+    end
+    local noun, verb
+    for w in q:gmatch("%a+") do
+        if TRAIN_NOUNS[w] then noun = true end
+        if w == "learn" or w == "train" or w == "trainable" or w == "learnable" then verb = true end
+    end
+    return noun and verb or false
+end
+
+local function spellLabel(e)
+    local n = e.rank and e.rank:match("%d+")
+    return GOLD .. e.name .. "|r" .. (n and (" " .. n) or "")
+end
+
+local function bySpell(a, b)
+    if a.level ~= b.level then return a.level < b.level end
+    if a.name ~= b.name then return a.name < b.name end
+    return (tonumber(a.rank and a.rank:match("%d+")) or 0) < (tonumber(b.rank and b.rank:match("%d+")) or 0)
+end
+
+--- Class spells you can train now (from the recorded trainer list), their cost, the nearest
+--- class trainer, and what comes next.
+local function answerTraining()
+    local classFile, level = askerClass(), askerLevel()
+    local target = targetsById[classFile]
+    local best = target and D.Rank(friendlyPlaces(D.byTarget[target.id]))[1]
+    local trainer = best and (GOLD .. best.place.name .. "|r, " .. shortHow(best) .. " " .. pinLink(best.place, best.spawn, target.label)) or ""
+    local t = AskBotCharDB and AskBotCharDB.training
+    if not t or not next(t.spells) then
+        return say("Open your class trainer once so I can read what it teaches."
+            .. (best and (" Nearest " .. target.label .. ": " .. trainer) or ""))
+    end
+    local now, nextLevel, cost = {}, nil, 0
+    for _, e in pairs(t.spells) do
+        if not e.used and e.level then
+            if e.level <= level then
+                now[#now + 1] = e
+                cost = cost + (e.cost or 0)
+            elseif not nextLevel or e.level < nextLevel then
+                nextLevel = e.level
+            end
+        end
+    end
+    table.sort(now, bySpell)
+    if #now > 0 then
+        local labels = {}
+        for i, e in ipairs(now) do labels[i] = spellLabel(e) end
+        say("Ready to train (" .. #now .. "): " .. joinSome(labels, 8)
+            .. (cost > 0 and (GREY .. " - " .. AskBot.Prices.Format(cost) .. "|r") or ""))
+        if best then
+            say("  " .. target.label .. ": " .. trainer)
+            autoPin(best.place, best.spawn, target.label)
+        end
+    else
+        say("Nothing new to train at level " .. level .. ".")
+    end
+    if nextLevel then
+        local later = {}
+        for _, e in pairs(t.spells) do
+            if not e.used and e.level == nextLevel then later[#later + 1] = e end
+        end
+        table.sort(later, bySpell)
+        local labels = {}
+        for i, e in ipairs(later) do labels[i] = spellLabel(e) end
+        say(GREY .. "  Next at level " .. nextLevel .. ":|r " .. joinSome(labels, 6))
+    end
+end
+AskBot.RecordTraining, AskBot.LearnedSpell = recordTraining, learnedSpell
+
 -- For the files loaded after this one.
 Levelling.answerQuestLog, Levelling.doableQuests = answerQuestLog, doableQuests
 Levelling.answerQuestsHere, Levelling.currentZoneMap = answerQuestsHere, currentZoneMap
@@ -740,3 +882,4 @@ Levelling.answerDungeons, Levelling.answerPlan, Levelling.answerTidy = answerDun
 Levelling.answerHandInRoute, Levelling.answerRares = answerHandInRoute, answerRares
 Levelling.answerGroup, Levelling.answerPerson = answerGroup, answerPerson
 Levelling.HEARTH_QUESTIONS, Levelling.answerHearth = HEARTH_QUESTIONS, answerHearth
+Levelling.trainingQuestion, Levelling.answerTraining = trainingQuestion, answerTraining

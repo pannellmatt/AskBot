@@ -116,11 +116,12 @@ events:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 -- modern C_TradeSkillUI); registering one the client lacks is an error, so try each.
 for _, event in ipairs({ "TRADE_SKILL_SHOW", "TRADE_SKILL_UPDATE", "TRADE_SKILL_LIST_UPDATE",
     "TRADE_SKILL_DATA_SOURCE_CHANGED", "CRAFT_SHOW", "CRAFT_UPDATE", "UPDATE_MOUSEOVER_UNIT", "PLAYER_TARGET_CHANGED",
-    "UNIT_SPELLCAST_SUCCEEDED", "PLAYER_ENTERING_WORLD", "HEARTHSTONE_BOUND" }) do
+    "UNIT_SPELLCAST_SUCCEEDED", "PLAYER_ENTERING_WORLD", "HEARTHSTONE_BOUND", "TRAINER_SHOW", "TRAINER_UPDATE",
+    "LEARNED_SPELL_IN_TAB" }) do
     local valid = not (C_EventUtils and C_EventUtils.IsEventValid) or C_EventUtils.IsEventValid(event)
     if valid then pcall(events.RegisterEvent, events, event) end
 end
-local recordTimer
+local recordTimer, trainerTimer
 local hearthPending
 
 -- Questie has no creature types, so remember which NPCs the game calls beasts as you meet
@@ -179,6 +180,14 @@ events:SetScript("OnEvent", function(_, event, ...)
             local ok, err = pcall(recordRecipes, kind)
             if not ok and geterrorhandler then geterrorhandler()(err) end
         end)
+    elseif event == "TRAINER_SHOW" or event == "TRAINER_UPDATE" then
+        if trainerTimer then trainerTimer:Cancel() end
+        trainerTimer = C_Timer.NewTimer(0.3, function()
+            local ok, err = pcall(AskBot.RecordTraining)
+            if not ok and geterrorhandler then geterrorhandler()(err) end
+        end)
+    elseif event == "LEARNED_SPELL_IN_TAB" then
+        pcall(AskBot.LearnedSpell, (...))
     elseif event == "ZONE_CHANGED_NEW_AREA" then
         -- Let the map settle before asking which zone this is.
         C_Timer.After(3, function()
@@ -211,7 +220,8 @@ local function help()
     say("  /askbot what do I need before Deadmines    /askbot who has [quest]")
     say("  /askbot where can I mine copper    /askbot Peacebloom    /askbot where should I mine")
     say("  /askbot upgrades    /askbot upgrades legs    /askbot what gear should I get as a feral druid")
-    say("  /askbot is [item] an upgrade    /askbot target")
+    say("  /askbot is [item] an upgrade    /askbot anything in my bags an upgrade    /askbot target")
+    say("  /askbot what skills can I learn")
     say("  /askbot recipe for Linen Bag    /askbot mats for 5 Linen Bag    /askbot how do I level tailoring")
     say("  /askbot show all skinning trainers    /askbot hearth    /askbot again    /askbot history")
     say("  /askbot quests for Stormwind rep    /askbot quest starters")
