@@ -49,6 +49,10 @@ Shift-click a quest into the command, or type its name.
 - `/ab what do I need before [quest]` (or `how do I unlock`, `why can't I get`, `[quest] prereqs`) lists the earlier quests you haven't done, in order, with where to pick up the first one. It also mentions optional lead-in quests.
 - `/ab what comes after [quest]` lists what a quest leads to, and whether you can take it yet.
 
+**Reputation:** `/ab quests for Stormwind rep` (or `Argent Dawn rep quests`, `how do I get rep with Timbermaw`) shows your standing, the faction's quests in your log, the nearest givers of ones you can take now with how much reputation each gives, and ones for later levels. Short names such as SW, IF, Org, UC, TB and AD work.
+
+**Items that start quests:** `/ab quest starters` lists quest-starting items in your bags, then ones that drop near you for quests at your level. Asking about an item that starts a quest says so.
+
 Examples:
 - `/ab [The Defias Brotherhood]`
 - `/ab who gives Bounty on Murlocs`

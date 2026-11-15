@@ -894,6 +894,11 @@ local function answerItem(query, mode, hits, others)
         local price = AskBot.Prices.Auction(hits[1][2])
         if price then say("  AH price: " .. AskBot.Prices.Format(price)) end
     end
+    local starts = D.startItems[hits[1][2]]
+    if starts then
+        say("  Starts quest " .. makeLink(QuestDB.name(starts) or ("quest " .. starts), function() AskBot.Ask("quest " .. starts) end)
+            .. GREY .. " (right-click it to begin)|r")
+    end
     if shownDrops and not ratesShown and not dropRateNoteShown then
         dropRateNoteShown = true
         say(GREY .. "  (No drop rates known for these.)|r")
@@ -2387,6 +2392,10 @@ end
 -- Professions: recipe sources, mats shopping lists, skill-up plans
 --------------------------------------------------------------------------------------------
 
+-- (A do-block: the file is close to Lua's 200-locals-per-chunk limit.)
+local recordRecipes, personalProfession, professionQuestion
+do
+
 -- Words for each profession, and whether it's a crafting one (its recipes are recorded
 -- from the profession window).
 local PROFESSIONS = {
@@ -2474,7 +2483,7 @@ local function readModernRecipes()
     return prof, info and info.skillLevel, info and info.maxSkillLevel, recipes
 end
 
-local function recordRecipes(kind)
+function recordRecipes(kind)
     local api
     if kind == "craft" then
         api = { line = GetCraftDisplaySkillLine, num = GetNumCrafts, info = GetCraftInfo, link = GetCraftItemLink,
@@ -2544,7 +2553,7 @@ local function reagentPrice(id)
     if vendor and #vendor > 0 then return nil, "vendor" end
 end
 
-local function bagCount(id)
+local function ownedCount(id)
     if not id then return 0 end
     local f = (C_Item and C_Item.GetItemCount) or GetItemCount
     return f and f(id, true) or 0
@@ -2560,7 +2569,7 @@ local function answerMats(recipe, prof, count)
     local total, unknown, haveAll = 0, false, true
     for _, r in ipairs(recipe.reagents) do
         local need = r.count * count
-        local have = bagCount(r.id)
+        local have = ownedCount(r.id)
         local buy = math.max(0, need - have)
         local name = r.id and itemLinkText(r.id) or r.name or "?"
         local line = "  " .. need .. " " .. name .. ": "
@@ -2762,7 +2771,7 @@ local function answerSkillUp(prof)
                 local cost, unknown = 0, false
                 for _, g in ipairs(c.reagents) do
                     local price = reagentPrice(g.id)
-                    local short = math.max(0, g.count - bagCount(g.id))
+                    local short = math.max(0, g.count - ownedCount(g.id))
                     if short > 0 then
                         if price then cost = cost + price * short else unknown = true end
                     end
@@ -2808,7 +2817,7 @@ local function answerSkillUp(prof)
             local cost, unknown = 0, false
             for _, g in ipairs(r.reagents) do
                 local price = reagentPrice(g.id)
-                local short = math.max(0, g.count - bagCount(g.id))
+                local short = math.max(0, g.count - ownedCount(g.id))
                 if short > 0 then
                     if price then cost = cost + price * short else unknown = true end
                 end
@@ -2857,7 +2866,7 @@ local SKILLUP_PATTERNS = { "^how do i level (.+)$", "^how to level (.+)$", "^how
     "^what should i craft for (.+)$" }
 
 --- Is `q` a profession question that needs your own recipes or skills? (For "!ask".)
-local function personalProfession(q)
+function personalProfession(q)
     for _, list in ipairs({ MATS_PATTERNS, SKILLUP_PATTERNS }) do
         for _, pattern in ipairs(list) do
             local s = q:match(pattern)
@@ -2868,7 +2877,7 @@ local function personalProfession(q)
 end
 
 --- Answers profession questions; returns true if it did.
-local function professionQuestion(q, isServiceQuestion)
+function professionQuestion(q, isServiceQuestion)
     -- Skill-ups need a profession named.
     for _, pattern in ipairs(SKILLUP_PATTERNS) do
         local s = q:match(pattern)
@@ -2939,6 +2948,7 @@ local function professionQuestion(q, isServiceQuestion)
         end
     end
     return false
+end
 end
 
 --------------------------------------------------------------------------------------------
@@ -3568,6 +3578,194 @@ local function exactHits(list, query)
     if hits and hits[1][1] == D.NameKey(query) then return hits, others end
 end
 
+--------------------------------------------------------------------------------------------
+-- Reputation quests and items that start quests
+--------------------------------------------------------------------------------------------
+
+-- (Inside a do-block: the file is close to Lua's 200-locals-per-chunk limit.)
+local answerRep, answerQuestStarters, REP_PATTERNS, STARTER_QUESTIONS
+do
+-- Names for factions the game can't name (no API, or not met yet).
+local FACTION_NAMES = { [72] = "Stormwind", [47] = "Ironforge", [69] = "Darnassus", [54] = "Gnomeregan Exiles",
+    [76] = "Orgrimmar", [68] = "Undercity", [81] = "Thunder Bluff", [530] = "Darkspear Trolls", [529] = "Argent Dawn",
+    [21] = "Booty Bay", [369] = "Gadgetzan", [470] = "Ratchet", [577] = "Everlook", [87] = "Bloodsail Buccaneers",
+    [270] = "Zandalar Tribe", [609] = "Cenarion Circle", [576] = "Timbermaw Hold", [59] = "Thorium Brotherhood",
+    [349] = "Ravenholdt", [730] = "Stormpike Guard", [729] = "Frostwolf Clan", [509] = "The League of Arathor",
+    [510] = "The Defilers", [889] = "Warsong Outriders", [890] = "Silverwing Sentinels", [93] = "Magram Clan Centaur",
+    [92] = "Gelkis Clan Centaur", [809] = "Shen'dralar", [910] = "Brood of Nozdormu", [749] = "Hydraxian Waterlords",
+    [589] = "Wintersaber Trainers", [471] = "Wildhammer Clan", [70] = "Syndicate" }
+local FACTION_ALIASES = { sw = "stormwind", ["if"] = "ironforge", darn = "darnassus", gnomes = "gnomeregan exiles",
+    org = "orgrimmar", og = "orgrimmar", uc = "undercity", tb = "thunder bluff", trolls = "darkspear trolls",
+    ad = "argent dawn", cc = "cenarion circle", bb = "booty bay", timbermaw = "timbermaw hold", tb2 = "thunder bluff" }
+
+local function factionName(id)
+    if C_Reputation and C_Reputation.GetFactionDataByID then
+        local ok, d = pcall(C_Reputation.GetFactionDataByID, id)
+        if ok and type(d) == "table" and d.name then return d.name end
+    end
+    if GetFactionInfoByID then
+        local ok, name = pcall(GetFactionInfoByID, id)
+        if ok and name then return name end
+    end
+    return FACTION_NAMES[id]
+end
+
+--- "Friendly 1,200/6,000", or nil when the game doesn't say.
+local function standingText(id)
+    if not GetFactionInfoByID then return nil end
+    local ok, name, _, standing, barMin, barMax, value = pcall(GetFactionInfoByID, id)
+    if not ok or not name or not standing then return nil end
+    local label = _G["FACTION_STANDING_LABEL" .. standing] or ("rank " .. standing)
+    if barMin and barMax and value and barMax > barMin then
+        return label .. " " .. (value - barMin) .. "/" .. (barMax - barMin)
+    end
+    return label
+end
+
+local factionList
+local function factionNames()
+    if not factionList then
+        factionList = {}
+        for id in pairs(D.repQuests) do
+            local name = factionName(id)
+            if name then factionList[#factionList + 1] = { D.NameKey(name), id, name } end
+        end
+    end
+    return factionList
+end
+
+--- "quests for Stormwind rep": quests you can do that give reputation with a faction.
+function answerRep(query)
+    query = query:gsub("^the ", ""):gsub(" faction$", "")
+    query = FACTION_ALIASES[query] or query
+    local hits = D.FindByName(factionNames(), query)
+    if not hits then return say("I don't know a faction called \"" .. query .. "\" that quests give reputation with.") end
+    local fid, fname = hits[1][2], hits[1][3]
+    local inLog = {}
+    for _, q in ipairs(questLogEntries()) do inLog[q.id] = true end
+    local rep, ready, later, logged, done, total = {}, {}, {}, {}, 0, 0
+    for _, e in ipairs(D.repQuests[fid]) do
+        local q = e[1]
+        if questForMe(q) then
+            total = total + 1
+            rep[q] = e[2]
+            local status = questStatus(q, inLog)
+            if status == "ready" then ready[#ready + 1] = q
+            elseif status == "inLog" then logged[#logged + 1] = q
+            elseif status == "level" then later[#later + 1] = q
+            elseif status == "done" then done = done + 1 end
+        end
+    end
+    local function label(q) return questLabel(q) .. " |cff66cc33+" .. rep[q] .. "|r" end
+    local standing = standingText(fid)
+    say(GOLD .. fname .. "|r" .. (standing and (" (" .. standing .. ")") or "") .. ": " .. total .. " quests give reputation"
+        .. (done > 0 and (", " .. done .. " done") or "") .. ".")
+    if #logged > 0 then
+        local names = {}
+        for i = 1, math.min(4, #logged) do names[i] = label(logged[i]) end
+        say("  In your log: " .. table.concat(names, ", ") .. (#logged > 4 and (GREY .. " +" .. (#logged - 4) .. "|r") or ""))
+    end
+    local withGiver = {}
+    for _, q in ipairs(ready) do if D.questInfo[q] then withGiver[#withGiver + 1] = q end end
+    local list, count = questGivers(withGiver)
+    for i = 1, math.min(4, #list) do
+        local g = list[i]
+        local names = {}
+        for j, q in ipairs(g.quests) do
+            if j > 3 then names[#names + 1] = GREY .. "+" .. (#g.quests - 3) .. "|r"; break end
+            names[#names + 1] = label(q)
+        end
+        say("  " .. GOLD .. g.r.place.name .. "|r, " .. shortHow(g.r) .. " " .. pinLink(g.r.place, g.r.spawn, fname .. " rep")
+            .. ": " .. table.concat(names, ", "))
+    end
+    if #ready > count then say(GREY .. "  +" .. (#ready - count) .. " more on other continents or from items.|r") end
+    if #later > 0 then
+        table.sort(later, function(a, b) return (QuestDB.requiredLevel(a) or 0) < (QuestDB.requiredLevel(b) or 0) end)
+        local names = {}
+        for i = 1, math.min(3, #later) do names[i] = label(later[i]) .. GREY .. " (needs " .. (QuestDB.requiredLevel(later[i]) or "?") .. ")|r" end
+        say("  Later: " .. table.concat(names, ", ") .. (#later > 3 and (GREY .. " +" .. (#later - 3) .. "|r") or ""))
+    end
+    if #ready == 0 and #logged == 0 then say(GREY .. "  None you can take right now.|r") end
+    if list[1] then autoPin(list[1].r.place, list[1].r.spawn, fname .. " rep") end
+end
+
+REP_PATTERNS = { "^quests for (.+) rep$", "^quests for (.+) reputation$", "^(.+) rep quests$", "^(.+) reputation quests$",
+    "^rep quests for (.+)$", "^reputation quests for (.+)$", "^how do i get (.+) rep$", "^how do i get (.+) reputation$",
+    "^how do i get rep with (.+)$", "^how do i get reputation with (.+)$", "^how to get (.+) rep$",
+    "^quests that give (.+) rep$", "^quests that give (.+) reputation$", "^where can i get (.+) rep$",
+    "^how do i raise (.+) rep$", "^how do i raise (.+) reputation$" }
+
+--- Bag items that start a quest you haven't done: list of { item, quest }.
+local function bagQuestStarters()
+    local numSlots = (C_Container and C_Container.GetContainerNumSlots) or GetContainerNumSlots
+    local itemId = (C_Container and C_Container.GetContainerItemID) or GetContainerItemID
+    local isCompleted = (C_QuestLog and C_QuestLog.IsQuestFlaggedCompleted) or IsQuestFlaggedCompleted
+    local out, seen = {}, {}
+    if not numSlots or not itemId then return out end
+    for bag = 0, 4 do
+        for slot = 1, numSlots(bag) or 0 do
+            local id = itemId(bag, slot)
+            local q = id and D.startItems[id]
+            if q and not seen[id] and not (isCompleted and isCompleted(q)) then
+                seen[id] = true
+                out[#out + 1] = { item = id, quest = q }
+            end
+        end
+    end
+    return out
+end
+
+--- "quest starters": items in your bags that start quests, and ones that drop near you
+--- for quests at your level.
+function answerQuestStarters()
+    local inBags = bagQuestStarters()
+    if #inBags > 0 then
+        local names = {}
+        for i, e in ipairs(inBags) do names[i] = itemLinkText(e.item) .. " > " .. questLabel(e.quest) end
+        say("In your bags (right-click to start): " .. table.concat(names, ", "))
+    end
+    local level, inLog = askerLevel(), {}
+    for _, q in ipairs(questLogEntries()) do inLog[q.id] = true end
+    for _, e in ipairs(inBags) do inLog[e.quest] = true end -- already have the item
+    local isCompleted = (C_QuestLog and C_QuestLog.IsQuestFlaggedCompleted) or IsQuestFlaggedCompleted
+    local places, questFor = {}, {}
+    for item, q in pairs(D.startItems) do
+        local ql = QuestDB.questLevel(q) or 0
+        if ql >= level - 3 and ql <= level + 4 and (QuestDB.requiredLevel(q) or 0) <= level and not inLog[q]
+            and not (isCompleted and isCompleted(q)) and questForMe(q) then
+            local sources = placesForIds(ItemDB.npcDrops(item), ItemDB.objectDrops(item), false)
+            if #sources > 0 then
+                local best = D.Rank(sources)[1]
+                if best then
+                    local p = { kind = best.place.kind, id = best.place.id, name = best.place.name, spawns = { best.spawn },
+                        item = item, quest = q, from = best.place.name }
+                    places[#places + 1] = p
+                end
+            end
+        end
+    end
+    if #places == 0 then
+        if #inBags == 0 then say("No quest-starting items in your bags, and none that drop near you at your level.") end
+        return
+    end
+    captureForMap(places)
+    local ranked = D.Rank(places)
+    say("Items that start quests at your level, nearest first:")
+    for i = 1, math.min(AskBot.Option("maxResults") + 2, #ranked) do
+        local r = ranked[i]
+        local p = r.place
+        say("  " .. itemLinkText(p.item) .. " > " .. questLabel(p.quest) .. " - " .. (p.kind == "object" and "in " or "from ")
+            .. GOLD .. p.from .. "|r (" .. D.ZoneName(r.spawn.uiMapId) .. ", " .. shortHow(r) .. ") " .. pinLink(p, r.spawn, itemName(p.item)))
+    end
+    if ranked[1] then autoPin(ranked[1].place, ranked[1].spawn, itemName(ranked[1].place.item)) end
+end
+
+STARTER_QUESTIONS = {}
+for _, s in ipairs({ "quest starters", "quest starter items", "quest starting items", "items that start quests",
+    "what items start quests", "which items start quests", "do i have any quest starters", "quest items that start quests",
+    "starter items", "items that start a quest" }) do STARTER_QUESTIONS[s] = true end
+end
+
 local HEARTH_QUESTIONS = {}
 for _, s in ipairs({ "hearth", "hearthstone", "my hearth", "my hearthstone", "where is my hearth", "where is my hearthstone",
     "where does my hearth go", "where does my hearthstone go", "is my hearth ready", "hearth cooldown",
@@ -3619,6 +3817,11 @@ local function answer(question)
         return answerQuest(nil, intent == "questEnd" and "end" or intent == "questStart" and "start" or "auto", { tonumber(questId) })
     end
     if HEARTH_QUESTIONS[q] then return answerHearth() end
+    if STARTER_QUESTIONS[q] then return answerQuestStarters() end
+    for _, pattern in ipairs(REP_PATTERNS) do
+        local faction = q:match(pattern)
+        if faction then return answerRep(faction) end
+    end
 
     -- "show all skinning trainers": answer as usual, then put every place on the map.
     local showAll = q:match("^show all (.+)$") or q:match("^show (.+) on the map$") or q:match("^show (.+) on map$")
@@ -3981,6 +4184,7 @@ local function help()
     say("  /askbot is [item] an upgrade    /askbot target")
     say("  /askbot recipe for Linen Bag    /askbot mats for 5 Linen Bag    /askbot how do I level tailoring")
     say("  /askbot show all skinning trainers    /askbot hearth    /askbot again    /askbot history")
+    say("  /askbot quests for Stormwind rep    /askbot quest starters")
     say("  /askbot where is my party    /askbot where is <name>")
     say("Click " .. "|cff71d5ff[pin]|r" .. " on any answer to put a pin on it.")
     say("/askbot clear - remove the pin.  /askbot status - index info.  Also /ab and /ask.")
@@ -4217,6 +4421,7 @@ function AskBot.IsPersonalQuestion(question)
     if gearQuestion(q) then return true end
     if personalProfession(q) then return true end
     if HEARTH_QUESTIONS[q] then return true end
+    if STARTER_QUESTIONS[q] then return true end
     if question:find("|Hitem:") then
         local rest = normalize((question:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|H.-|h.-|h", " "):gsub("|r", "")))
         if asksUpgrade(rest) then return true end

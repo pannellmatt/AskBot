@@ -212,6 +212,7 @@ local quests = {
     [145] = { "Test of Righteousness", 1, { { 6 } }, { { 6 } }, 22, 20,   -- paladin: lumber from inside
         { nil, nil, { { 6994 } } } },
     [146] = { "Warrior Errand", 1, { { 6 } }, { { 6 } }, 20, 18, { { { 641 } } } }, -- warrior: kill inside
+    [147] = { "The Defias Note", 1, { nil, nil, { 9030 } }, { { 9 } }, 20, 15 },  -- started by an item
     [130] = { "Chain Part 1", 1, { { 25 } }, { { 25 } }, 14, 10 },
     [131] = { "Chain Part 2", 1, { { 25 } }, { { 25 } }, 16, 12 },
     [132] = { "Chain Part 3", 1, { { 25 } }, { { 25 } }, 18, 15 },
@@ -251,6 +252,8 @@ local chain = {
     [143] = { single = { 142 } },
 }
 local questZone = { [142] = 1581, [143] = 1581, [144] = 1581 }
+-- Reputation rewards: Stormwind (72)
+local questRep = { [100] = { { 72, 75 } }, [105] = { { 72, 250 } }, [109] = { { 72, 150 } }, [107] = { { 72, 500 } } }
 local questClasses = { [145] = 2, [146] = 1 } -- paladin, warrior
 local completed = { [135] = true }
 C_QuestLog = {
@@ -283,6 +286,7 @@ local items = {
     [9022] = { name = "Spell Ring" },
     [5771] = { name = "Pattern: Red Linen Bag", vendors = { 12 } },          -- a recipe sold by the Thread Seller
     [2406] = { name = "Pattern: Fine Leather Boots", vendors = { 12 } },
+    [9030] = { name = "Strange Note", npcDrops = { 10 } },                   -- starts The Defias Note
     [9004] = { name = "Silver Ring" },
 }
 local objects = { [500] = { "Wanted Poster", { [W] = { { 53, 52 } } } }, [501] = { "Shrine of Remulos", { [W] = { { 20, 80 } } } },
@@ -334,6 +338,7 @@ QuestDB = {
     breadcrumbs = function(id) return chain[id] and chain[id].crumbs end,
     zoneOrSort = function(id) return questZone[id] end,
     requiredClasses = function(id) return questClasses[id] end,
+    reputationReward = function(id) return questRep[id] end,
 }
 ItemDB = { GetAllIds = function() return ids(items) end }
 for _, field in ipairs({ "name", "npcDrops", "objectDrops", "vendors", "questRewards", "itemDrops" }) do
@@ -1063,6 +1068,23 @@ do
     ask("where is auberdine quester", "boat", { "hearth to" })
     bags[6948], AskBotCharDB.bind, GetBindLocation, GetItemCooldown = nil, nil, nil, nil
 end
+
+-- More Questie data ------------------------------------------------------------------------
+-- Reputation: Stormwind quests in your log, to pick up, and for later
+ask("quests for stormwind rep", { "Stormwind|r: 4 quests give reputation.", "In your log: ", "The Defias Brotherhood|r |cff66cc33+75",
+    "Gryan Stoutmantle|r", "Patrolling Westfall|r |cff66cc33+250", "Westfall Stew|r |cff66cc33+150",
+    "Later: ", "Too Hard|r |cff66cc33+500|r|cffaaaaaa (needs 28)" })
+ask("sw rep quests", "Stormwind|r: 4 quests give reputation")
+ask("how do i get rep with timbuktu", "I don't know a faction called \"timbuktu\"")
+-- Items that start quests: the item answer says so, and "quest starters" lists them
+itemCache[9030] = "Strange Note"
+ask("where can i get strange note", { "Defias Thug", "Starts quest ", "[The Defias Note]", "right-click it to begin" })
+ask("quest starters", { "Items that start quests at your level, nearest first:", "[Strange Note]|r > ", "The Defias Note",
+    "from |cffffd100Defias Thug|r (Westfall" }, { "In your bags" })
+C_Container = { GetContainerNumSlots = function(bag) return bag == 0 and 1 or 0 end,
+    GetContainerItemID = function() return 9030 end }
+ask("quest starters", "In your bags (right-click to start): ", { "nearest first" })
+C_Container = nil
 
 -- Settings and "!ask" from other players --------------------------------------------------
 local function expectChat(label, fn, expect, reject)

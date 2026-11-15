@@ -21,6 +21,8 @@ local D = {
     rares = {},         -- npc id -> rank (2 = rare elite, 4 = rare)
     rareDrops = {},     -- rare npc id -> list of gear item ids it drops
     beasts = {},        -- npc ids of hostile, non-elite beasts (by name), for skinning
+    repQuests = {},     -- faction id -> list of { quest id, reputation }
+    startItems = {},    -- item id -> quest id it starts (right-click the item)
     recipeItems = {},   -- list of { key of what it teaches, item id, recipe name, kind ("Pattern") }
     gather = {},        -- node name -> { name, prof, skill, special, items, ids }
     gatherKeys = {},    -- name key (node or item) -> { display, nodes = { node names } }
@@ -494,6 +496,19 @@ function D.BuildIndex()
                 level = QuestDB.questLevel(id), req = QuestDB.requiredLevel(id),
                 max = QuestDB.requiredMaxLevel(id), npcs = npcs, objects = objects,
             }
+        end
+        -- Reputation rewards, for "quests for Stormwind rep"
+        for _, r in ipairs(QuestDB.reputationReward and QuestDB.reputationReward(id) or {}) do
+            local faction, value = r[1], r[2]
+            if faction and value and value > 0 then
+                local list = D.repQuests[faction]
+                if not list then list = {}; D.repQuests[faction] = list end
+                list[#list + 1] = { id, value }
+            end
+        end
+        -- Items that start a quest
+        for _, item in ipairs(by and by[3] or {}) do
+            if item > 0 then D.startItems[item] = id end
         end
         -- Items a quest hands you when you take it, for "where do I get another one?"
         local given = QuestDB.sourceItemId and QuestDB.sourceItemId(id)
