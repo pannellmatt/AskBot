@@ -21,7 +21,8 @@ Built for **World of Warcraft: Forever**.
 ### Levelling helper
 - `/ab where should I quest next?`: the best zones for you right now, then the nearest quest givers.
 - `/ab where should I level` (or `/ab zones for level 25`): the zones with the most quests *you* can still take near your level, each with the quest giver to head for. Worked out from Questie's data and your own progress, not a fixed levelling guide.
-- `/ab what's next`: everything in your quest log that's ready to hand in, then the nearest unfinished objectives across all your quests.
+- `/ab what should I do?` (or `what's next`, `what now`): one line each for your nearest hand-in, your nearest objective, the nearest new quests, a better zone if you're not in it, and a dungeon for your level.
+- `/ab my quests`: everything in your quest log that's ready to hand in, then the nearest unfinished objectives across all your quests.
 - `/ab quests here`: quests you can pick up, nearest first, grouped by who gives them and coloured by difficulty. AskBot uses Questie's own checks, so completed quests, missing prerequisites, quests for other classes and grey quests are all left out.
 - `/ab dungeons` (or `/ab dungeons for level 25`): dungeons that suit your level, with entrance pins and a link to their loot *(with AtlasLoot)*.
 - `/ab rares`: the nearest rare and rare-elite mobs, with their levels.
@@ -128,7 +129,7 @@ Thor <Gryphon Master> - Westfall 56.6, 52.6 (71 yds, <1 min)
 - **Pins for them too:** each answer carries the game's own `[Map Pin Location]` link, which anyone can click to put the spot on their map, no addon needed.
 - **No spam:** it's off by default, answers are at most four lines, and there's a cooldown per person.
 - **Several AskBots:** when more than one guild member runs AskBot, only one of them answers.
-- **Quest log questions:** "what's next" and "quests here" need the asker's own quest log, so they only work with `/ab`.
+- **Quest log questions:** "what should I do", "my quests" and "quests here" need the asker's own quest log, so they only work with `/ab`.
 
 ## Settings
 

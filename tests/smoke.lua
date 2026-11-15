@@ -574,8 +574,10 @@ ChatFrame3 = nil
 SlashCmdList.ASKBOT("status", { chatFrame = DEFAULT_CHAT_FRAME }) -- switch back for the rest
 
 -- Levelling helper
-ask("what's next", { "Ready to hand in:", "The Defias Brotherhood", "Gryan Stoutmantle", "Nearest objectives:",
+ask("my quests", { "Ready to hand in:", "The Defias Brotherhood", "Gryan Stoutmantle", "Nearest objectives:",
     "Linen Cloth|r from: ", "Scout the Redridge camp" }, { "Kill: " })
+ask("what should i do next", { "What to do next (level 20):", "Hand in: ", "Objective: ", "New quests: ",
+    "Dungeon: ", "[my quests]" }, { "Best zone" })
 ask("quests here", { "Quests you can pick up (10 on this continent)", "Gryan Stoutmantle", "Patrolling Westfall",
     "Wanted Poster", "Bounty on Murlocs" }, { "Too Easy", "Too Hard", "Already Done", "Defias Brotherhood" })
 ask("what quests can i get", "Patrolling Westfall")
@@ -599,6 +601,13 @@ end
 C_Map.GetBestMapForUnit = function(unit) return ({ player = 1436, party1 = 1433 })[unit] end
 ask("zones debug", { "|cffffd100Westfall|r|cffaaaaaa: 14", "counted", "in your log", "too easy (grey)",
     "How these were ranked", "of yours", "away, score" }, { "The Barrens" })
+-- "What now" from another zone (the map says Redridge) suggests the best zone, Westfall
+do
+    local saved = C_Map.GetBestMapForUnit
+    C_Map.GetBestMapForUnit = function(unit) return ({ player = 1433 })[unit] end
+    ask("what now", { "Best zone: |cffffd100Westfall|r (2 yours + 4 new) - Gryan Stoutmantle, 68 yds" })
+    C_Map.GetBestMapForUnit = saved
+end
 ask("quests here", "Quests you can pick up", { "Thork", "Horde Errand" })
 ask("zones for level 14", { "Where to quest at level 14:", "Westfall|r: 2 yours + 4 new" },
     { "Too Easy" })

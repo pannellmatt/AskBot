@@ -999,7 +999,7 @@ local function questLabel(id, name)
     return color .. (level and level > 0 and ("[" .. level .. "] ") or "") .. (name or QuestDB.name(id) or ("quest " .. id)) .. "|r"
 end
 
-local function answerWhatsNext()
+local function answerQuestLog()
     local entries = questLogEntries()
     if #entries == 0 then
         return say("Your quest log is empty. Try " .. GOLD .. "/ab quests here|r to find some.")
@@ -1079,10 +1079,9 @@ local function doableQuests(level)
     return ids
 end
 
---- Quest givers near you with quests you can take, nearest first (same continent).
-local function answerQuestsHere(ids, maxGivers)
-    ids = ids or doableQuests()
-    maxGivers = maxGivers or 5
+--- Quest givers on your continent with quests you can take, nearest first:
+--- a list of { r = ranked result, quests = { ids } }, and the number of quests.
+local function questGivers(ids)
     local groups, count = {}, 0
     for _, id in ipairs(ids) do
         local info = D.questInfo[id]
@@ -1097,25 +1096,33 @@ local function answerQuestsHere(ids, maxGivers)
     end
 
     local list = {}
-    for _, g in pairs(groups) do list[#list + 1] = g end
+    for _, g in pairs(groups) do
+        table.sort(g.quests, function(a, b) return (QuestDB.questLevel(a) or 0) < (QuestDB.questLevel(b) or 0) end)
+        list[#list + 1] = g
+    end
+    table.sort(list, function(a, b) return quicker(a.r, b.r) end)
+    return list, count
+end
+
+--- "Gryan Stoutmantle, 68 yds [pin]: [14] Patrolling Westfall, [15] Westfall Stew +1"
+local function giverLine(g, maxQuests)
+    local names = {}
+    for j, id in ipairs(g.quests) do
+        if j > maxQuests then names[#names + 1] = GREY .. "+" .. (#g.quests - maxQuests) .. "|r"; break end
+        names[#names + 1] = questLabel(id)
+    end
+    return GOLD .. g.r.place.name .. "|r, " .. shortHow(g.r) .. " " .. pinLink(g.r.place, g.r.spawn, "quests")
+        .. ": " .. table.concat(names, ", ")
+end
+
+--- Quest givers near you with quests you can take, nearest first (same continent).
+local function answerQuestsHere(ids, maxGivers)
+    local list, count = questGivers(ids or doableQuests())
     if #list == 0 then
         return say("No new quests for you on this continent, as far as Questie knows.")
     end
-    table.sort(list, function(a, b) return quicker(a.r, b.r) end)
-
     say("Quests you can pick up (" .. count .. " on this continent), nearest first:")
-    for i = 1, math.min(maxGivers, #list) do
-        local g = list[i]
-        table.sort(g.quests, function(a, b) return (QuestDB.questLevel(a) or 0) < (QuestDB.questLevel(b) or 0) end)
-        local names = {}
-        for j, id in ipairs(g.quests) do
-            if j > 3 then names[#names + 1] = GREY .. "+" .. (#g.quests - 3) .. "|r"; break end
-            names[#names + 1] = questLabel(id)
-        end
-        -- One line per giver: "Gryan Stoutmantle, 68 yds [pin]: [14] Patrolling Westfall, [15] Westfall Stew +1"
-        say("  " .. GOLD .. g.r.place.name .. "|r, " .. shortHow(g.r) .. " " .. pinLink(g.r.place, g.r.spawn, "quests")
-            .. ": " .. table.concat(names, ", "))
-    end
+    for i = 1, math.min(maxGivers or 5, #list) do say("  " .. giverLine(list[i], 3)) end
     return list[1].r
 end
 
@@ -1125,16 +1132,21 @@ end
 -- not suggested as places to level.
 local CAPITALS = { [1453] = true, [1455] = true, [1457] = true, [1454] = true, [1456] = true, [1458] = true }
 
---- For /ab zones debug: every quest given in the zone you're in, sorted by why it does or
---- doesn't count towards the zone suggestions.
-local function explainCurrentZone(level)
+--- The zone map you're in; sub-zone maps (towns, caves) roll up to their zone.
+local function currentZoneMap()
     local mapId = C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
     local info = mapId and C_Map.GetMapInfo(mapId)
-    -- Sub-zone maps (towns, caves) roll up to their zone.
     while info and info.mapType and info.mapType > 3 and info.parentMapID and info.parentMapID > 0 do
         mapId = info.parentMapID
         info = C_Map.GetMapInfo(mapId)
     end
+    return mapId
+end
+
+--- For /ab zones debug: every quest given in the zone you're in, sorted by why it does or
+--- doesn't count towards the zone suggestions.
+local function explainCurrentZone(level)
+    local mapId = currentZoneMap()
     if not mapId then return say(GREY .. "(I can't tell which zone you're in.)|r") end
 
     local QuestieDBModule = QuestieLoader and QuestieLoader:ImportModule("QuestieDB")
@@ -1190,14 +1202,10 @@ local function explainCurrentZone(level)
     end
 end
 
---- Zones worth questing in: the most quests you can take near your level, weighed by how
---- far away the zone is, each with its busiest quest giver as the place to start.
---- With `debug`, also prints the numbers behind the ranking.
-local function answerZones(level, ids, maxZones, debug)
-    level = level or askerLevel()
-    ids = ids or doableQuests(level)
-    maxZones = maxZones or 3
-
+--- Zones worth questing in, best first: the most quests you can take near your level,
+--- weighed by how far away the zone is. Each is { map, active = your quests there,
+--- levels = new quests' levels, r = where to start (ranked result) }, or nil if none.
+local function rankZones(level, ids)
     local zones = {}
     local function zoneFor(map)
         local z = zones[map]
@@ -1256,10 +1264,7 @@ local function answerZones(level, ids, maxZones, debug)
             list[#list + 1] = z
         end
     end
-    if #list == 0 then
-        say("Questie doesn't know of a zone with several quests for level " .. level .. " that you haven't done.")
-        return nil
-    end
+    if #list == 0 then return nil end
     table.sort(list, function(a, b) return a.questScore > b.questScore end)
     for i = #list, 13, -1 do list[i] = nil end -- only the best dozen are worth timing
     for _, z in ipairs(list) do
@@ -1272,6 +1277,27 @@ local function answerZones(level, ids, maxZones, debug)
         z.score = z.questScore / (1 + minutes / 5)
     end
     table.sort(list, function(a, b) return a.score > b.score end)
+    return list
+end
+
+--- "Westfall: 2 yours + 4 new"
+local function zoneCounts(z)
+    local counts = {}
+    if #z.active > 0 then counts[#counts + 1] = #z.active .. " yours" end
+    if #z.levels > 0 then counts[#counts + 1] = #z.levels .. " new" end
+    return table.concat(counts, " + ")
+end
+
+--- Where to quest, one line per zone. With `debug`, also prints the numbers behind the ranking.
+local function answerZones(level, ids, maxZones, debug)
+    level = level or askerLevel()
+    ids = ids or doableQuests(level)
+    maxZones = maxZones or 3
+    local list = rankZones(level, ids)
+    if not list then
+        say("Questie doesn't know of a zone with several quests for level " .. level .. " that you haven't done.")
+        return nil
+    end
 
     say("Where to quest at level " .. level .. ":")
     local firstHub
@@ -1283,12 +1309,9 @@ local function answerZones(level, ids, maxZones, debug)
         table.sort(levels)
         local lo = levels[math.floor(#levels * 0.15) + 1]
         local hi = levels[math.max(1, math.ceil(#levels * 0.85))]
-        local counts = {}
-        if #z.active > 0 then counts[#counts + 1] = #z.active .. " yours" end
-        if #z.levels > 0 then counts[#counts + 1] = #z.levels .. " new" end
         local zoneName = D.ZoneName(z.map)
         -- One line per zone: "1. Redridge Mountains: 10 yours + 3 new, lvl 15-26 - Glinting Mud, 75 yds [pin]"
-        local line = i .. ". " .. GOLD .. zoneName .. "|r: " .. table.concat(counts, " + ")
+        local line = i .. ". " .. GOLD .. zoneName .. "|r: " .. zoneCounts(z)
             .. (lo > 0 and (", lvl " .. lo .. (hi > lo and ("-" .. hi) or "")) or "")
         if z.r then
             line = line .. " - " .. z.r.place.name .. ", " .. shortHow(z.r) .. " " .. pinLink(z.r.place, z.r.spawn, zoneName)
@@ -1326,9 +1349,9 @@ local function answerWhereToQuest()
     if target then autoPin(target.place, target.spawn, "quests") end
 end
 
-local function answerDungeons(level)
-    if lootUnavailable() then return end
-    level = level or askerLevel()
+--- AtlasLoot's dungeons whose level range includes `level`, best fit first:
+--- { inst, lo, hi, best }.
+local function dungeonsFor(level)
     local fits = {}
     for _, inst in ipairs(AskBot.Loot.instances) do
         local range = inst.levelRange
@@ -1338,8 +1361,15 @@ local function answerDungeons(level)
             if level >= lo and level <= hi then fits[#fits + 1] = { inst = inst, lo = lo, hi = hi, best = best } end
         end
     end
-    if #fits == 0 then return say("AtlasLoot has no dungeons for level " .. level .. ".") end
     table.sort(fits, function(a, b) return math.abs(a.best - level) < math.abs(b.best - level) end)
+    return fits
+end
+
+local function answerDungeons(level)
+    if lootUnavailable() then return end
+    level = level or askerLevel()
+    local fits = dungeonsFor(level)
+    if #fits == 0 then return say("AtlasLoot has no dungeons for level " .. level .. ".") end
 
     say("Dungeons for level " .. level .. ":")
     local pinned
@@ -1354,6 +1384,91 @@ local function answerDungeons(level)
         if r and not pinned then pinned = r end
     end
     if pinned then autoPin(pinned.place, pinned.spawn, pinned.place.name) end
+end
+
+--- One line for a quest objective: "Kill Defias Trapper, 150 yds [pin]",
+--- "Collect Linen Cloth from Defias Thug, ~2 min [pin]".
+local function shortObjective(o, label)
+    local r = o.best
+    local what
+    if o.verb == "Collect" then
+        what = "Collect " .. GOLD .. o.name .. "|r from " .. GOLD .. r.place.name .. "|r"
+    elseif o.verb == "Make" then
+        what = "Make " .. GOLD .. o.name .. "|r at " .. GOLD .. r.place.name .. "|r"
+    else
+        what = o.verb .. " " .. GOLD .. o.name .. "|r"
+    end
+    return what .. ", " .. shortHow(r) .. " " .. pinLink(r.place, r.spawn, label)
+end
+
+--- "What should I do next?": one line each for the nearest hand-in, the nearest objective,
+--- the nearest new quests, a better zone (if it isn't this one) and a dungeon for your level.
+local function answerPlan()
+    local level = askerLevel()
+    local lines, first = {}, nil
+    local function add(text, r)
+        lines[#lines + 1] = "  " .. text
+        first = first or r
+    end
+
+    local turnIns, nearest = {}, nil
+    for _, q in ipairs(questLogEntries()) do
+        local name = QuestDB.name(q.id) or q.name
+        local complete, objectives, turnIn = questTasks(q.id)
+        if complete then
+            if turnIn then turnIns[#turnIns + 1] = { quest = q.id, name = name, r = turnIn } end
+        else
+            for _, o in ipairs(objectives) do
+                if o.best and not o.later and not o.have and (not nearest or quicker(o.best, nearest.o.best)) then
+                    nearest = { quest = q.id, name = name, o = o }
+                end
+            end
+        end
+    end
+    table.sort(turnIns, function(a, b) return quicker(a.r, b.r) end)
+
+    local t = turnIns[1]
+    if t then
+        local more = #turnIns > 1
+            and (" " .. makeLink("+" .. (#turnIns - 1) .. " more", function() AskBot.Ask("my quests") end)) or ""
+        add("Hand in: " .. questLabel(t.quest, t.name) .. " - " .. GOLD .. t.r.place.name .. "|r, " .. shortHow(t.r)
+            .. " " .. pinLink(t.r.place, t.r.spawn, t.name) .. more, t.r)
+    end
+    if nearest then
+        add("Objective: " .. questLabel(nearest.quest, nearest.name) .. " - " .. shortObjective(nearest.o, nearest.name),
+            nearest.o.best)
+    end
+
+    local ids = doableQuests(level)
+    local givers = questGivers(ids)
+    if givers[1] then add("New quests: " .. giverLine(givers[1], 2), givers[1].r) end
+
+    local zones = rankZones(level, ids)
+    local z = zones and zones[1]
+    if z and z.r and z.map ~= currentZoneMap() then
+        add("Best zone: " .. GOLD .. D.ZoneName(z.map) .. "|r (" .. zoneCounts(z) .. ") - " .. z.r.place.name .. ", "
+            .. shortHow(z.r) .. " " .. pinLink(z.r.place, z.r.spawn, D.ZoneName(z.map)), z.r)
+    end
+
+    if AskBot.Loot.status == "ready" then
+        local f = dungeonsFor(level)[1]
+        if f then
+            local entrance = AskBot.Loot.EntrancePlace(f.inst)
+            local r = entrance and D.Rank({ entrance })[1]
+            add("Dungeon: " .. GOLD .. f.inst.name .. "|r (" .. f.lo .. "-" .. f.hi .. ")"
+                .. (r and (" - entrance " .. shortHow(r) .. " " .. pinLink(r.place, r.spawn, f.inst.name)) or ""))
+        end
+    end
+
+    if #lines == 0 then
+        return say("Questie doesn't know of anything for you nearby. Try " .. GOLD .. "/ab zones|r.")
+    end
+    say("What to do next (level " .. level .. "):")
+    for _, line in ipairs(lines) do say(line) end
+    say("  " .. GREY .. "More:|r " .. makeLink("my quests", function() AskBot.Ask("my quests") end) .. " "
+        .. makeLink("where to quest", function() AskBot.Ask("where should i quest") end) .. " "
+        .. makeLink("dungeons", function() AskBot.Ask("dungeons") end))
+    if first then autoPin(first.place, first.spawn, first.place.name) end
 end
 
 local function answerRares()
@@ -2111,7 +2226,10 @@ local SPECIAL = {
         "^levell?ing zones?", "^where to go$" } },
     { "next", {
         "^what is next$", "^whats next$", "^what next$", "^next$", "^what now$", "^what should i do",
-        "^what do i do", "^my quests$", "^quest log$", "^questlog$", "^todo$", "^to do$", "^next steps?$" } },
+        "^what do i do", "^what can i do", "^what to do", "^what shall i do", "^im bored", "^next steps?$" } },
+    { "questLog", {
+        "^my quests$", "^quest log$", "^questlog$", "^my quest log$", "^todo$", "^to do$", "^my objectives$",
+        "^quest objectives$", "^objectives$" } },
     { "questsHere", {
         "^quests$", "^quests here$", "^quests nearby$", "^quests near me$", "^quests around", "^nearby quests$",
         "^new quests", "^available quests", "^any quests", "^what quests", "^which quests", "^find quests",
@@ -2222,7 +2340,8 @@ local function answer(question)
                 if entry[1] == "group" then return answerGroup() end
                 if entry[1] == "mineBest" then return answerGatherBest("Mining") end
                 if entry[1] == "herbBest" then return answerGatherBest("Herbalism") end
-                if entry[1] == "next" then return answerWhatsNext() end
+                if entry[1] == "next" then return answerPlan() end
+                if entry[1] == "questLog" then return answerQuestLog() end
                 if entry[1] == "questNext" then return answerWhereToQuest() end
                 if entry[1] == "questsHere" then
                     local r = answerQuestsHere()
@@ -2420,8 +2539,8 @@ end)
 --------------------------------------------------------------------------------------------
 
 local function help()
-    say("Ask me where things are. Levelling: " .. GOLD .. "/ab where should I quest next|r, " .. GOLD .. "/ab what's next|r, "
-        .. GOLD .. "/ab quests here|r, " .. GOLD .. "/ab zones|r, " .. GOLD .. "/ab dungeons|r, " .. GOLD .. "/ab rares|r. Examples:")
+    say("Ask me where things are. Levelling: " .. GOLD .. "/ab what should I do|r, " .. GOLD .. "/ab my quests|r, "
+        .. GOLD .. "/ab where should I quest next|r, " .. GOLD .. "/ab quests here|r, " .. GOLD .. "/ab zones|r, " .. GOLD .. "/ab dungeons|r, " .. GOLD .. "/ab rares|r. Examples:")
     say("  /askbot where is my nearest skinning trainer")
     say("  /askbot nearest flight master    /askbot where's my class trainer")
     say("  /askbot who gives The Defias Brotherhood    /askbot turn in Bounty on Murlocs")
@@ -2620,7 +2739,7 @@ function AskBot.IsPersonalQuestion(question)
     local q = normalize(question)
     if gearQuestion(q) then return true end
     for _, entry in ipairs(SPECIAL) do
-        if entry[1] == "next" or entry[1] == "questsHere" or entry[1] == "questNext" or entry[1] == "zones" then
+        if entry[1] == "next" or entry[1] == "questLog" or entry[1] == "questsHere" or entry[1] == "questNext" or entry[1] == "zones" then
             for _, pattern in ipairs(entry[2]) do
                 if q:find(pattern) then return true end
             end
