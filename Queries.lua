@@ -71,6 +71,11 @@ AskBot.targets = {
     { id = "ah",      label = "Auctioneer",    keys = { "auction", "ah" },   test = service("AUCTIONEER", { "auctioneer" }) },
     { id = "stable",  label = "Stable master", keys = { "stable" },          test = service("STABLEMASTER", { "stable master" }) },
     { id = "repair",  label = "Repair vendor", keys = { "repair" },          test = service("REPAIR") },
+    -- Any vendor (after repair, so "repair vendor" still means a repairer). Only ones with a
+    -- subtitle ("General Supplies", "Weaponsmith"): Forever's Questie data also has vendors that
+    -- aren't in the game (Season of Discovery's Rune Broker), and those have none.
+    { id = "vendor",  label = "Vendor",        keys = { "vendor", "merchant", "general goods" },
+      test = function(sub, hasFlag) return sub ~= nil and hasFlag("VENDOR") end },
 }
 
 -- Words that mean "my own class trainer".

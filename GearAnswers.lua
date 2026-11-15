@@ -244,12 +244,34 @@ local function gainText(gain, current)
     return (pct > 0 and "+" or "") .. pct .. "%"
 end
 
+--- " (at 25) (train Plate Mail)": when you can use it and what you'd need to learn.
+local function verdictExtra(r, level)
+    local extra = ""
+    if r.req and r.req > level and not (r.needs and r.needs:find(" at ")) then
+        extra = extra .. GREY .. " (at " .. r.req .. ")|r"
+    end
+    if r.needs then extra = extra .. " |cffff8040(" .. r.needs .. ")|r" end
+    return extra
+end
+
+--- "Arms Warrior", or when Gear.Spec only guessed: "Warrior (no talents yet, scored as Arms)".
+local function specLabel(spec, how, summary, className)
+    if how ~= "guess" then return spec.name .. " " .. className end
+    local why = (summary and summary:find("[1-9]") and "talents unclear") or (summary and "no talents yet") or "spec unknown"
+    return className .. " (" .. why .. ", scored as " .. spec.name .. ")"
+end
+
+--- Does a Gear.Compare result beat what you wear by enough to matter?
+local function beatsWorn(r)
+    return r.gain > math.max(0.5, r.current * 0.03)
+end
+
 --- One line on whether item `id` beats what you wear: "[Item] (Legs): upgrade, +35% over
 --- [Worn Leggings] for Arms Warrior". Load the item first.
 local function upgradeVerdict(id, words)
     local G = AskBot.Gear
     local classFile, level = askerClass(), askerLevel()
-    local spec = G.Spec(classFile, words or {})
+    local spec, how, summary = G.Spec(classFile, words or {})
     if not spec then return nil end
     local className = UnitClass("player") or classFile
     local r = G.Compare(id, spec, classFile, level)
@@ -259,19 +281,15 @@ local function upgradeVerdict(id, words)
         return item .. ": " .. className .. "s can't use " .. r.cannot .. "."
     end
     local head = item .. " (" .. G.GROUP_LABELS[r.group] .. "): "
-    local extra = ""
-    if r.req and r.req > level and not (r.needs and r.needs:find(" at ")) then
-        extra = extra .. GREY .. " (at " .. r.req .. ")|r"
-    end
-    if r.needs then extra = extra .. " |cffff8040(" .. r.needs .. ")|r" end
+    local extra = verdictExtra(r, level)
     if not r.score then return head .. "I couldn't read its stats yet, ask again in a moment." end
     if not r.gain then return head .. "you wield a two-hander, so an off hand doesn't fit." .. extra end
-    local forWho = " for " .. spec.name .. " " .. className
+    local forWho = " for " .. specLabel(spec, how, summary, className)
     if r.currentLink and r.currentLink:find("item:" .. id .. ":", 1, true) then
         return head .. "you're wearing it."
     end
     local vs = r.currentLink and (" over " .. r.currentLink) or ""
-    if r.gain > math.max(0.5, r.current * 0.03) then
+    if beatsWorn(r) then
         if r.current <= 0 then return head .. "|cff40ff40upgrade|r" .. forWho .. ", fills an empty slot." .. extra end
         return head .. "|cff40ff40upgrade|r, " .. gainText(r.gain, r.current) .. vs .. forWho .. "." .. extra
     end
@@ -296,6 +314,57 @@ local function isGear(id)
     local loc = f and select(4, f(id))
     return loc ~= nil and loc ~= "" and loc ~= "INVTYPE_NON_EQUIP_IGNORE" and loc ~= "INVTYPE_BAG"
         and loc ~= "INVTYPE_AMMO" and loc ~= "INVTYPE_QUIVER" and loc ~= "INVTYPE_TABARD" and loc ~= "INVTYPE_BODY"
+end
+
+--- "anything in my bags an upgrade?": a bag word plus an upgrade word.
+local function bagUpgradeQuestion(q)
+    local w = wordSet(q)
+    return (w.bag or w.bags or w.inventory) and (w.upgrade or w.upgrades or w.better or w.equip or w.wear) and true
+end
+
+--- Gear in your bags that beats what you wear, biggest gain first. `words` can name a spec.
+local function answerBagUpgrades(words)
+    if AskBot.asker then return end
+    local numSlots = (C_Container and C_Container.GetContainerNumSlots) or GetContainerNumSlots
+    local itemId = (C_Container and C_Container.GetContainerItemID) or GetContainerItemID
+    if not numSlots or not itemId then return say("I can't read your bags on this client.") end
+    local ids, seen = {}, {}
+    for bag = 0, (NUM_BAG_SLOTS or 4) do
+        for slot = 1, (numSlots(bag) or 0) do
+            local id = itemId(bag, slot)
+            if id and not seen[id] and isGear(id) then seen[id] = true; ids[#ids + 1] = id end
+        end
+    end
+    if #ids == 0 then return say("There's no gear in your bags.") end
+    local G = AskBot.Gear
+    G.Load(ids, function()
+        local ok, err = pcall(function()
+            local classFile, level = askerClass(), askerLevel()
+            local spec, how, summary = G.Spec(classFile, words or {})
+            if not spec then return end
+            local found = {}
+            for _, id in ipairs(ids) do
+                local r = G.Compare(id, spec, classFile, level)
+                local wearing = r.currentLink and r.currentLink:find("item:" .. id .. ":", 1, true)
+                if r.group and r.score and r.gain and not wearing and beatsWorn(r) then
+                    found[#found + 1] = { id = id, r = r, pct = r.current > 0 and r.gain / r.current or math.huge }
+                end
+            end
+            local forWho = specLabel(spec, how, summary, UnitClass("player") or classFile)
+            if #found == 0 then
+                return say("Nothing in your bags beats what you wear for " .. forWho .. GREY .. " (" .. #ids .. " item"
+                    .. (#ids == 1 and "" or "s") .. " checked).|r")
+            end
+            table.sort(found, function(a, b) return a.pct > b.pct end)
+            say("Upgrades in your bags for " .. forWho .. ":")
+            for _, f in ipairs(found) do
+                local r = f.r
+                say("  " .. itemLinkText(f.id) .. " (" .. G.GROUP_LABELS[r.group] .. "): " .. gainText(r.gain, r.current)
+                    .. (r.current > 0 and r.currentLink and (" over " .. r.currentLink) or "") .. verdictExtra(r, level))
+            end
+        end)
+        if not ok and geterrorhandler then geterrorhandler()(err) end
+    end)
 end
 
 --- Words that ask "is it better than mine?" (with the item's own name taken out).
@@ -376,4 +445,5 @@ AskBot.CheckRares = checkRares
 GearAnswers.wordSet, GearAnswers.gearQuestion = wordSet, gearQuestion
 GearAnswers.answerUpgrades, GearAnswers.answerIsUpgrade = answerUpgrades, answerIsUpgrade
 GearAnswers.isGear, GearAnswers.asksUpgrade = isGear, asksUpgrade
+GearAnswers.bagUpgradeQuestion, GearAnswers.answerBagUpgrades = bagUpgradeQuestion, answerBagUpgrades
 GearAnswers.UPGRADE_NAME_PATTERNS, GearAnswers.checkRares = UPGRADE_NAME_PATTERNS, checkRares

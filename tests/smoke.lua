@@ -150,6 +150,7 @@ local npcs = {
     [7] = { "Orc Skinner", "Skinning Trainer", 16, "H", { [OG] = { { 63, 45 } } } },
     [8] = { "Dungeon Guy", "Skinning Trainer", 16, "A", { [W] = { { -1, -1 } } } },
     [9] = { "Gryan Stoutmantle", "People's Militia", 2, "A", { [W] = { { 56.3, 47.5 } } } },
+    [36] = { "Rune Broker", nil, 4, "A", { [W] = { { 50, 50 } } } },  -- in Questie's data, not in the game
     [10] = { "Defias Thug", nil, 0, nil, { [W] = { { 40, 40 }, { 45, 45 } } }, 9, 10 },
     [11] = { "Kobold Vermin", nil, 0, nil, { [DM] = { { 30, 30 } } }, 2, 3 },
     [12] = { "Thread Seller", "Trade Supplies", 4, "A", { [SW] = { { 60, 70 } } } },
@@ -537,6 +538,8 @@ ask("status", "ready")
 ask("where is my nearest skinning trainer", "Helene Peltskinner", { "Horde Skinner" })
 ask("nearest fp?", "Thor")
 ask("closest inn", "Innkeeper Heather")
+ask("where is my nearest vendor", "Thread Seller", { "Horde Vendor", "Rune Broker", "Sorry" })
+ask("nearest merchant", "Thread Seller")
 ask("where's my class trainer", "Ander Germaine")
 ask("where is the nearest ahead", "Sorry")
 ask("who gives The Defias Brotherhood", { "Gryan Stoutmantle", "level 18, needs 14" }, { "Horde Vendor" })
@@ -1084,6 +1087,25 @@ ask("quest starters", { "Items that start quests at your level, nearest first:",
 C_Container = { GetContainerNumSlots = function(bag) return bag == 0 and 1 or 0 end,
     GetContainerItemID = function() return 9030 end }
 ask("quest starters", "In your bags (right-click to start): ", { "nearest first" })
+-- "anything in my bags an upgrade?": leggings beat the worn ones; a wand and a note don't count
+local bagItems = { 9005, 9001, 9030, 9010 }
+C_Container = { GetContainerNumSlots = function(bag) return bag == 0 and #bagItems or 0 end,
+    GetContainerItemID = function(_, slot) return bagItems[slot] end }
+ask("anything in my bag an upgrade", { "Upgrades in your bags for Arms Warrior:", "[Militia Leggings]|h|r (Legs): +514% over",
+    "[Worn Leggings]" }, { "Apprentice Wand", "Strange Note", "Sorry" })
+-- No talents yet: say the spec is a guess
+local savedTalents = talents
+talents = { 0, 0, 0 }
+ask("anything in my bag an upgrade", "Upgrades in your bags for Warrior (no talents yet, scored as Arms):")
+ask("is militia leggings an upgrade", "for Warrior (no talents yet, scored as Arms).")
+talents = { 6, 4, 0 }
+ask("bag upgrades", "for Warrior (talents unclear, scored as Arms)")
+ask("bag upgrades as fury", "Upgrades in your bags for Fury Warrior:")
+talents = savedTalents
+bagItems = { 9005, 9030 }
+ask("any upgrades in my bags?", "Nothing in your bags beats what you wear for Arms Warrior")
+bagItems = { 9030 }
+ask("is anything in my inventory better", "There's no gear in your bags.")
 C_Container = nil
 
 -- Settings and "!ask" from other players --------------------------------------------------

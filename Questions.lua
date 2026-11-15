@@ -26,6 +26,7 @@ local wordSet, gearQuestion = AskBot.GearAnswers.wordSet, AskBot.GearAnswers.gea
 local answerUpgrades, answerIsUpgrade = AskBot.GearAnswers.answerUpgrades, AskBot.GearAnswers.answerIsUpgrade
 local isGear, asksUpgrade = AskBot.GearAnswers.isGear, AskBot.GearAnswers.asksUpgrade
 local UPGRADE_NAME_PATTERNS = AskBot.GearAnswers.UPGRADE_NAME_PATTERNS
+local bagUpgradeQuestion, answerBagUpgrades = AskBot.GearAnswers.bagUpgradeQuestion, AskBot.GearAnswers.answerBagUpgrades
 local gatherLookup, answerGather = AskBot.Professions.gatherLookup, AskBot.Professions.answerGather
 local answerGatherBest = AskBot.Professions.answerGatherBest
 local professionQuestion = AskBot.Professions.professionQuestion
@@ -293,6 +294,9 @@ local function answer(question)
         return answer(name)
     end
 
+    -- "anything in my bags an upgrade?"
+    if bagUpgradeQuestion(q) then return answerBagUpgrades(wordSet(q)) end
+
     -- "is Militia Leggings an upgrade?" by name
     for _, pattern in ipairs(UPGRADE_NAME_PATTERNS) do
         local name = q:match(pattern)
@@ -431,7 +435,7 @@ end
 --- Questions only the asker's own AskBot can answer (they need their quest log or gear).
 function AskBot.IsPersonalQuestion(question)
     local q = normalize(question)
-    if gearQuestion(q) then return true end
+    if gearQuestion(q) or bagUpgradeQuestion(q) then return true end
     if personalProfession(q) then return true end
     if HEARTH_QUESTIONS[q] then return true end
     if STARTER_QUESTIONS[q] then return true end
