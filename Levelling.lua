@@ -743,7 +743,25 @@ end
 --------------------------------------------------------------------------------------------
 
 -- AskBotCharDB.training = { seen = time, spells = { ["Rend|Rank 2"] = { name, rank, level, cost, used } } }
-local function trainingKey(name, rank) return name .. "|" .. (rank or "") end
+-- When the trainer gives no rank (Forever), the key is "Rend|L20": each rank has its own level.
+local function trainingKey(name, rank, level)
+    if rank then return name .. "|" .. rank end
+    return name .. "|L" .. (level or "")
+end
+
+local SERVICE_TYPES = { header = true, available = true, unavailable = true, used = true }
+
+--- One trainer row as name, rank (or nil), type, collapsed (a header that's folded up).
+--- The classic API gives name, rank, type, expanded; Forever gives the type second and no rank.
+local function trainerRow(i)
+    local name, a, b, c = GetTrainerServiceInfo(i)
+    if SERVICE_TYPES[a] then
+        local rank = type(b) == "string" and b:find("%d") and b or nil
+        local expanded = type(b) == "boolean" and b or c
+        return name, rank, a, expanded == false
+    end
+    return name, (a ~= "" and a) or nil, b, not c
+end
 
 --- Is the open trainer window your class trainer (not a profession, pet or weapon trainer)?
 local function isClassTrainerWindow()
@@ -762,17 +780,23 @@ local function recordTraining()
     AskBotCharDB = AskBotCharDB or {}
     local t = AskBotCharDB.training or { spells = {} }
     AskBotCharDB.training = t
+    -- Lists saved before 0.14.1 on Forever stored the type as the rank, one entry per spell
+    -- name (the highest rank won): drop them, this visit rebuilds the list.
+    for key, e in pairs(t.spells) do
+        if SERVICE_TYPES[e.rank] then t.spells[key] = nil end
+    end
     local visible, collapsed = {}, false
     for i = 1, (GetNumTrainerServices() or 0) do
-        local name, rank, category, expanded = GetTrainerServiceInfo(i)
+        local name, rank, category, folded = trainerRow(i)
         if category == "header" then
-            if not expanded then collapsed = true end
+            if folded then collapsed = true end
         elseif name and category then
-            local key = trainingKey(name, rank ~= "" and rank or nil)
+            local level = GetTrainerServiceLevelReq and GetTrainerServiceLevelReq(i)
+            local key = trainingKey(name, rank, level)
             visible[key] = true
             local e = t.spells[key] or {}
-            e.name, e.rank = name, (rank ~= "" and rank) or nil
-            e.level = (GetTrainerServiceLevelReq and GetTrainerServiceLevelReq(i)) or e.level
+            e.name, e.rank = name, rank
+            e.level = level or e.level
             e.cost = (GetTrainerServiceCost and GetTrainerServiceCost(i)) or e.cost
             e.used = category == "used"
             t.spells[key] = e
@@ -798,7 +822,19 @@ local function learnedSpell(spellId)
         or (GetSpellInfo and GetSpellInfo(spellId))
     local rank = (C_Spell and C_Spell.GetSpellSubtext and C_Spell.GetSpellSubtext(spellId))
         or (GetSpellSubtext and GetSpellSubtext(spellId))
-    local e = name and t.spells[trainingKey(name, rank ~= "" and rank or nil)]
+    if not name then return end
+    rank = (rank ~= "" and rank) or nil
+    local e = rank and t.spells[trainingKey(name, rank)]
+    if not e then
+        -- No rank to match (Forever): the lowest unlearned one you're high enough for.
+        local level = askerLevel()
+        for _, s in pairs(t.spells) do
+            if s.name == name and not s.used and s.level and s.level <= level
+                and (not e or s.level < e.level) then
+                e = s
+            end
+        end
+    end
     if e then e.used = true end
 end
 

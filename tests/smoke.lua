@@ -985,6 +985,21 @@ trainerList = { { "Growl", "Rank 2", "available", nil, 10, 100 } }
 fire("TRAINER_SHOW")
 advance(1)
 ask("spells i can learn", "Ready to train (1): |cffffd100Rend|r 3", { "Growl" })
+-- Forever's rows: name, type, no rank. Each rank of a spell is its own entry (by level), and
+-- an old list that stored the type as the rank is dropped.
+AskBotCharDB.training.spells["Heroic Strike|unavailable"] = { name = "Heroic Strike", rank = "unavailable", level = 56 }
+UnitGUID = function(u) if u == "npc" then return "Creature-0-1-1-1-6-0000" end return realGuid(u) end
+trainerList = {
+    { "Heroic Strike", "available", nil, nil, 8, 60 },
+    { "Hamstring", "available", nil, nil, 8, 100 },
+    { "Heroic Strike", "unavailable", nil, nil, 24, 1000 },
+    { "Heroic Strike", "unavailable", nil, nil, 56, 42000 },
+}
+GetTrainerServiceInfo = function(i) local s = trainerList[i]; return s[1], s[2], s[3], s[4] end
+fire("TRAINER_SHOW")
+advance(1)
+ask("what skills can i learn", { "Ready to train (2): |cffffd100Hamstring|r, |cffffd100Heroic Strike|r", " - 1s 60c",
+    "Next at level 24:|r |cffffd100Heroic Strike" }, { "Rend", "unavailable", "56" })
 UnitGUID = realGuid
 GetNumTrainerServices = nil
 
