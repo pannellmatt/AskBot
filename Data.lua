@@ -522,20 +522,50 @@ function D.RecordTaxiNodes()
         if D.IsFriendly(p, mine) then all[#all + 1] = p end
     end
     AskBotCharDB.knownTaxi = AskBotCharDB.knownTaxi or {}
+    -- Town names ("Lakeshire, Redridge" -> "Lakeshire") are the same for everyone: account-wide.
+    local names = AskBotDB and AskBotDB.taxiNames
+    if AskBotDB and not names then names = {}; AskBotDB.taxiNames = names end
     local learned = 0
     for _, node in ipairs(nodes) do
-        if node.state ~= unreachable and node.position then
+        if node.position then
             local wx, wy, inst = HBD:GetWorldCoordinatesFromZone(node.position.x, node.position.y, mapID)
             if wx then
                 local fm, _, d = nearestFlightMaster(inst, wx, wy, all)
                 if fm and d < 250 then
-                    if not AskBotCharDB.knownTaxi[fm.id] then learned = learned + 1 end
-                    AskBotCharDB.knownTaxi[fm.id] = true
+                    if names and node.name then names[fm.id] = node.name:match("^%s*([^,]+)") end
+                    if node.state ~= unreachable then
+                        if not AskBotCharDB.knownTaxi[fm.id] then learned = learned + 1 end
+                        AskBotCharDB.knownTaxi[fm.id] = true
+                    end
                 end
             end
         end
     end
     return learned
+end
+
+--- Yards between two resolved spawns on the same continent, or nil.
+function D.SpawnDistance(a, b)
+    if not (a and b and a.wx and b.wx) or a.inst ~= b.inst then return nil end
+    return HBD:GetWorldDistance(a.inst, a.wx, a.wy, b.wx, b.wy)
+end
+
+--- The friendly flight master serving the town around `spawn` (within 600 yards):
+--- the flight master's place, its town name if a flight map has shown it, and whether
+--- you have that flight path (nil when AskBot hasn't learned your flight paths yet).
+function D.TownFlight(spawn)
+    if not (spawn and spawn.wx) then return nil end
+    local mine = D.PlayerFaction()
+    local all = {}
+    for _, p in ipairs(D.byTarget.flight or {}) do
+        if D.IsFriendly(p, mine) then all[#all + 1] = p end
+    end
+    local fm, _, d = nearestFlightMaster(spawn.inst, spawn.wx, spawn.wy, all)
+    if not fm or d > 600 then return nil end
+    local known = AskBotCharDB and AskBotCharDB.knownTaxi
+    local learned
+    if known and next(known) ~= nil then learned = known[fm.id] == true end
+    return fm, AskBotDB and AskBotDB.taxiNames and AskBotDB.taxiNames[fm.id], learned
 end
 
 --------------------------------------------------------------------------------------------

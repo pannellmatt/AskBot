@@ -976,13 +976,13 @@ local function questLogEntries()
         for i = 1, (C_QuestLog.GetNumQuestLogEntries()) do
             local info = C_QuestLog.GetInfo(i)
             if info and not info.isHeader and info.questID and info.questID > 0 then
-                out[#out + 1] = { id = info.questID, name = info.title }
+                out[#out + 1] = { id = info.questID, name = info.title, group = info.suggestedGroup }
             end
         end
     elseif GetNumQuestLogEntries and GetQuestLogTitle then
         for i = 1, (GetNumQuestLogEntries()) do
-            local title, _, _, isHeader, _, _, _, questID = GetQuestLogTitle(i)
-            if not isHeader and questID and questID > 0 then out[#out + 1] = { id = questID, name = title } end
+            local title, _, group, isHeader, _, _, _, questID = GetQuestLogTitle(i)
+            if not isHeader and questID and questID > 0 then out[#out + 1] = { id = questID, name = title, group = group } end
         end
     end
     return out
@@ -1258,9 +1258,22 @@ local function rankZones(level, ids)
     for _, z in pairs(zones) do
         if #z.levels + #z.active >= 3 then
             z.questScore = #z.active * 3 + z.fit * 2 + (#z.levels - z.fit)
-            for _, g in pairs(z.givers) do
-                if not z.hub or g.n > z.hub.n then z.hub = g end
+            -- The hub is the town: the giver with the most quests from givers within 300 yards.
+            local function spawnHere(place)
+                for _, s in ipairs(place.spawns) do
+                    if s.uiMapId == z.map then return s end
+                end
             end
+            for _, g in pairs(z.givers) do
+                local s = spawnHere(g.place)
+                g.town = 0
+                for _, h in pairs(z.givers) do
+                    local d = D.SpawnDistance(s, spawnHere(h.place))
+                    if h == g or (d and d <= 300) then g.town = g.town + h.n end
+                end
+                if not z.hub or g.town > z.hub.town or (g.town == z.hub.town and g.n > z.hub.n) then z.hub = g end
+            end
+            z.hubSpawn = z.hub and spawnHere(z.hub.place)
             list[#list + 1] = z
         end
     end
@@ -1286,6 +1299,15 @@ local function zoneCounts(z)
     if #z.active > 0 then counts[#counts + 1] = #z.active .. " yours" end
     if #z.levels > 0 then counts[#counts + 1] = #z.levels .. " new" end
     return table.concat(counts, " + ")
+end
+
+--- ", FP Lakeshire (not learned)": the flight path in the zone's busiest town, for zones
+--- you're not in. The town name shows once a flight map has listed it.
+local function townFlightText(z)
+    if z.map == currentZoneMap() then return "" end
+    local fm, town, learned = D.TownFlight(z.hubSpawn)
+    if not fm then return "" end
+    return ", FP " .. GOLD .. (town or fm.name) .. "|r" .. (learned == false and (GREY .. " (not learned)|r") or "")
 end
 
 --- Where to quest, one line per zone. With `debug`, also prints the numbers behind the ranking.
@@ -1316,6 +1338,7 @@ local function answerZones(level, ids, maxZones, debug)
         if z.r then
             line = line .. " - " .. z.r.place.name .. ", " .. shortHow(z.r) .. " " .. pinLink(z.r.place, z.r.spawn, zoneName)
         end
+        line = line .. townFlightText(z)
         say("  " .. line)
         firstHub = firstHub or z.r
     end
@@ -1430,7 +1453,7 @@ local function answerPlan()
     local t = turnIns[1]
     if t then
         local more = #turnIns > 1
-            and (" " .. makeLink("+" .. (#turnIns - 1) .. " more", function() AskBot.Ask("my quests") end)) or ""
+            and (" " .. makeLink("+" .. (#turnIns - 1) .. " more", function() AskBot.Ask("hand in route") end)) or ""
         add("Hand in: " .. questLabel(t.quest, t.name) .. " - " .. GOLD .. t.r.place.name .. "|r, " .. shortHow(t.r)
             .. " " .. pinLink(t.r.place, t.r.spawn, t.name) .. more, t.r)
     end
@@ -1447,7 +1470,7 @@ local function answerPlan()
     local z = zones and zones[1]
     if z and z.r and z.map ~= currentZoneMap() then
         add("Best zone: " .. GOLD .. D.ZoneName(z.map) .. "|r (" .. zoneCounts(z) .. ") - " .. z.r.place.name .. ", "
-            .. shortHow(z.r) .. " " .. pinLink(z.r.place, z.r.spawn, D.ZoneName(z.map)), z.r)
+            .. shortHow(z.r) .. " " .. pinLink(z.r.place, z.r.spawn, D.ZoneName(z.map)) .. townFlightText(z), z.r)
     end
 
     if AskBot.Loot.status == "ready" then
@@ -1469,6 +1492,138 @@ local function answerPlan()
         .. makeLink("where to quest", function() AskBot.Ask("where should i quest") end) .. " "
         .. makeLink("dungeons", function() AskBot.Ask("dungeons") end))
     if first then autoPin(first.place, first.spawn, first.place.name) end
+end
+
+--- Up to `max` labels joined with commas, then "+N".
+local function joinSome(labels, max)
+    local shown = {}
+    for i = 1, math.min(max, #labels) do shown[i] = labels[i] end
+    return table.concat(shown, ", ") .. (#labels > max and (GREY .. " +" .. (#labels - max) .. "|r") or "")
+end
+
+--- Too easy to be worth much XP: Questie's grey rule, else 8+ levels below you.
+local function questIsGrey(level)
+    if not level or level <= 0 then return false end
+    local QuestieDBModule = QuestieLoader and QuestieLoader:ImportModule("QuestieDB")
+    if QuestieDBModule and QuestieDBModule.IsTrivial then
+        local ok, trivial = pcall(QuestieDBModule.IsTrivial, level)
+        if ok then return trivial == true end
+    end
+    return level < askerLevel() - 7
+end
+
+--- The game's quest tag: "Elite", "Dungeon", "Raid", "Group", "PvP"... or nil.
+local function questTag(id)
+    local name
+    if C_QuestLog and C_QuestLog.GetQuestTagInfo then
+        local ok, info = pcall(C_QuestLog.GetQuestTagInfo, id)
+        if ok and type(info) == "table" then name = info.tagName end
+    end
+    if not name and GetQuestTagInfo then
+        local ok, _, tagName = pcall(GetQuestTagInfo, id)
+        if ok then name = tagName end
+    end
+    return name ~= "" and name or nil
+end
+
+--- "Which quests should I abandon?": grey quests, quests that need a group, and quests
+--- whose next step is far away (another continent, or over 10 minutes).
+local function answerTidy()
+    local entries = questLogEntries()
+    if #entries == 0 then return say("Your quest log is empty.") end
+    local grey, group, far = {}, {}, {}
+    for _, q in ipairs(entries) do
+        local name = QuestDB.name(q.id) or q.name
+        local label = questLabel(q.id, name)
+        if questIsGrey(QuestDB.questLevel(q.id)) then
+            grey[#grey + 1] = label
+        else
+            local complete, objectives, turnIn = questTasks(q.id)
+            local dungeon, nextStep
+            for _, o in ipairs(objectives) do
+                if o.best then
+                    dungeon = dungeon or o.best.spawn.dungeon
+                    if not o.have and (not nextStep or quicker(o.best, nextStep)) then nextStep = o.best end
+                end
+            end
+            if complete then nextStep = turnIn end
+            local tag = questTag(q.id)
+            if dungeon then
+                group[#group + 1] = label .. GREY .. " (in " .. dungeon .. ")|r"
+            elseif tag and tag ~= "PvP" then
+                group[#group + 1] = label .. GREY .. " (" .. tag:lower() .. ")|r"
+            elseif q.group and q.group > 1 then
+                group[#group + 1] = label .. GREY .. " (group of " .. q.group .. ")|r"
+            elseif nextStep and nextStep.time and (nextStep.time > 600 or not nextStep.dist) then
+                far[#far + 1] = label .. GREY .. " (" .. D.ZoneName(nextStep.spawn.uiMapId) .. ", " .. shortHow(nextStep) .. ")|r"
+            end
+        end
+    end
+
+    local max = (C_QuestLog and C_QuestLog.GetMaxNumQuestsCanAccept and C_QuestLog.GetMaxNumQuestsCanAccept()) or 20
+    if #grey + #group + #far == 0 then
+        return say("Nothing to drop: none of your " .. #entries .. " quests are grey, need a group or are far away.")
+    end
+    say("Quest log: " .. #entries .. " of " .. max .. ". Could drop:")
+    if #grey > 0 then say("  Grey (little XP): " .. joinSome(grey, 4)) end
+    if #group > 0 then say("  Need a group: " .. joinSome(group, 3)) end
+    if #far > 0 then say("  Far away: " .. joinSome(far, 3)) end
+end
+
+--- "Where do I hand in my quests?": every complete quest's turn-in, as a route that
+--- always goes to the nearest stop next. One line per stop.
+local function answerHandInRoute()
+    local stops, byKey, unknown = {}, {}, 0
+    for _, q in ipairs(questLogEntries()) do
+        if questComplete(q.id) then
+            local turnIn = D.Rank(turnInPlaces(q.id))[1]
+            if turnIn then
+                local key = turnIn.place.kind .. turnIn.place.id
+                local stop = byKey[key]
+                if not stop then
+                    stop = { place = turnIn.place, quests = {} }
+                    byKey[key] = stop
+                    stops[#stops + 1] = stop
+                end
+                stop.quests[#stop.quests + 1] = questLabel(q.id, QuestDB.name(q.id) or q.name)
+            else
+                unknown = unknown + 1
+            end
+        end
+    end
+    if #stops == 0 then
+        return say(unknown > 0 and ("Questie doesn't know where to hand in your " .. unknown .. " complete quest"
+            .. (unknown == 1 and "" or "s") .. ".") or "Nothing in your quest log is ready to hand in yet.")
+    end
+
+    local route, origin, total, count = {}, nil, 0, 0
+    while #stops > 0 do
+        local places = {}
+        for i, s in ipairs(stops) do places[i] = s.place end
+        local r = D.Rank(places, origin)[1]
+        for i, s in ipairs(stops) do
+            if s.place == r.place then
+                route[#route + 1] = { stop = s, r = r }
+                count = count + #s.quests
+                table.remove(stops, i)
+                break
+            end
+        end
+        total = total + (r.time or 0)
+        local sp = r.spawn
+        origin = sp.wx and { x = sp.wx, y = sp.wy, inst = sp.inst } or nil
+    end
+
+    say("Hand-in route (" .. count .. " quest" .. (count == 1 and "" or "s")
+        .. (total > 0 and (", " .. formatTime(total)) or "") .. "):")
+    for i = 1, math.min(6, #route) do
+        local s, r = route[i].stop, route[i].r
+        say("  " .. i .. ". " .. GOLD .. s.place.name .. "|r, " .. shortHow(r) .. " " .. pinLink(r.place, r.spawn, s.place.name)
+            .. ": " .. joinSome(s.quests, 3))
+    end
+    if #route > 6 then say(GREY .. "  +" .. (#route - 6) .. " more stops|r") end
+    if unknown > 0 then say(GREY .. "  (" .. unknown .. " more with no known turn-in.)|r") end
+    autoPin(route[1].r.place, route[1].r.spawn, route[1].stop.place.name)
 end
 
 local function answerRares()
@@ -2219,8 +2374,20 @@ local SPECIAL = {
         "^where should i quest", "^where can i quest", "^where to quest", "^where do i quest", "^where shall i quest",
         "^what should i quest", "^where should i go next", "^where should i go now", "^where next$", "^where now$",
         "^where to go next", "^where do i go next", "^quest next$", "^questing next$" } },
+    { "handIn", {
+        "^hand ?ins?$", "^turn ?ins?$", "^hand ?in route", "^turn ?in route", "^route to hand in", "^where do i hand in$",
+        "^where do i turn in$", "^where do i hand in my quests", "^where do i turn in my quests", "^where to hand in$",
+        "^where to turn in$", "^where can i hand in$", "^where can i turn in$", "^hand in my quests", "^turn in my quests",
+        "^hand in everything", "^turn in everything", "^ready to hand in$", "^what can i hand in", "^what can i turn in" } },
+    { "tidy", {
+        "^tidy", "^clean ?up", "^clear ?up", "^sort out my quest", "^what should i abandon", "^what can i abandon",
+        "^which quests should i abandon", "^what quests should i abandon", "^which quests can i abandon",
+        "^what quests can i abandon", "^abandon", "^what should i drop", "^which quests should i drop",
+        "^what quests should i drop", "^drop quests", "^my quest log is full", "^quest log full", "^log full",
+        "^gr[ae]y quests" } },
     { "zones", {
-        "^zones? debug$", "^zones? for level (%d+)$", "^level (%d+) zones?$", "^where should i level at (%d+)$", "^where to level at (%d+)$",
+        "^where should i go at (%d+)$", "^where do i go at (%d+)$", "^where to go at (%d+)$", "^where should i be at (%d+)$",
+        "^where next at (%d+)$", "^next zone at (%d+)$", "^zones? debug$", "^zones? for level (%d+)$", "^level (%d+) zones?$", "^where should i level at (%d+)$", "^where to level at (%d+)$",
         "^where should i level", "^where to level", "^where do i level", "^where can i level", "^where should i go$",
         "^zones?$", "^zones? for me$", "^zones? for my level$", "^what zones?", "^which zones?", "^best zones?",
         "^levell?ing zones?", "^where to go$" } },
@@ -2342,6 +2509,8 @@ local function answer(question)
                 if entry[1] == "herbBest" then return answerGatherBest("Herbalism") end
                 if entry[1] == "next" then return answerPlan() end
                 if entry[1] == "questLog" then return answerQuestLog() end
+                if entry[1] == "handIn" then return answerHandInRoute() end
+                if entry[1] == "tidy" then return answerTidy() end
                 if entry[1] == "questNext" then return answerWhereToQuest() end
                 if entry[1] == "questsHere" then
                     local r = answerQuestsHere()
@@ -2541,6 +2710,7 @@ end)
 local function help()
     say("Ask me where things are. Levelling: " .. GOLD .. "/ab what should I do|r, " .. GOLD .. "/ab my quests|r, "
         .. GOLD .. "/ab where should I quest next|r, " .. GOLD .. "/ab quests here|r, " .. GOLD .. "/ab zones|r, " .. GOLD .. "/ab dungeons|r, " .. GOLD .. "/ab rares|r. Examples:")
+    say("  /askbot hand in route    /askbot which quests should I abandon    /askbot where should I go at 24")
     say("  /askbot where is my nearest skinning trainer")
     say("  /askbot nearest flight master    /askbot where's my class trainer")
     say("  /askbot who gives The Defias Brotherhood    /askbot turn in Bounty on Murlocs")
@@ -2739,7 +2909,8 @@ function AskBot.IsPersonalQuestion(question)
     local q = normalize(question)
     if gearQuestion(q) then return true end
     for _, entry in ipairs(SPECIAL) do
-        if entry[1] == "next" or entry[1] == "questLog" or entry[1] == "questsHere" or entry[1] == "questNext" or entry[1] == "zones" then
+        if entry[1] == "next" or entry[1] == "questLog" or entry[1] == "handIn" or entry[1] == "tidy"
+            or entry[1] == "questsHere" or entry[1] == "questNext" or entry[1] == "zones" then
             for _, pattern in ipairs(entry[2]) do
                 if q:find(pattern) then return true end
             end

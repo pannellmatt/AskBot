@@ -184,6 +184,7 @@ local quests = {
     [120] = { "Darkshore Task 1", 1, { { 23 } }, { { 23 } }, 19, 15 }, -- across the sea
     [121] = { "Darkshore Task 2", 1, { { 23 } }, { { 23 } }, 20, 15 },
     [122] = { "Darkshore Task 3", 1, { { 23 } }, { { 23 } }, 21, 15 },
+    [125] = { "Far Errand", 1, { { 22 } }, { { 22 } }, 20, 15 },         -- handed in on Teldrassil
     [130] = { "Chain Part 1", 1, { { 25 } }, { { 25 } }, 14, 10 },
     [131] = { "Chain Part 2", 1, { { 25 } }, { { 25 } }, 16, 12 },
     [132] = { "Chain Part 3", 1, { { 25 } }, { { 25 } }, 18, 15 },
@@ -609,6 +610,48 @@ do
     C_Map.GetBestMapForUnit = saved
 end
 ask("quests here", "Quests you can pick up", { "Thork", "Horde Errand" })
+
+-- Next town: zones you're not in name their town's flight path, once a flight map has
+-- shown its name; "not learned" when AskBot knows your flight paths and it isn't one.
+C_TaxiMap = { GetAllTaxiNodes = function()
+    return { { name = "Lakeshire, Redridge", position = { x = 0.30, y = 0.60 }, state = 2 } }
+end }
+GetTaxiMapID = function() return 1433 end
+fire("TAXIMAP_OPENED")
+do
+    local savedKnown = AskBotCharDB.knownTaxi
+    AskBotCharDB.knownTaxi = { [4] = true, [14] = true } -- Westfall and Stormwind, not Lakeshire
+    ask("where should i go at 18", { "Where to quest at level 18:",
+        "Redridge Mountains|r: 1 yours + 3 new", ", FP |cffffd100Lakeshire|r|cffaaaaaa (not learned)" },
+        { "Westfall|r, " })
+    AskBotCharDB.knownTaxi = savedKnown
+end
+
+-- Quest log tidy-up and the hand-in route, with a bigger quest log: 100 (complete, tagged
+-- elite), 103 (level 10: grey), 104 (complete: hand in at Martie in Redridge) and 125
+-- (complete: hand in on Teldrassil, two boats away).
+do
+    local savedInfo, savedNum = C_QuestLog.GetInfo, C_QuestLog.GetNumQuestLogEntries
+    local log = { { questID = 100, title = "The Defias Brotherhood" }, { questID = 103, title = "Red Linen Goods" },
+        { questID = 104, title = "Scout Redridge" }, { questID = 125, title = "Far Errand" } }
+    C_QuestLog.GetInfo = function(i) return log[i] end
+    C_QuestLog.GetNumQuestLogEntries = function() return #log end
+    C_QuestLog.GetQuestTagInfo = function(id) return id == 100 and { tagID = 1, tagName = "Elite" } or nil end
+    questLog[104].complete, questLog[125] = true, { complete = true, objectives = {} }
+
+    ask("which quests should i abandon", { "Quest log: 4 of 20. Could drop:", "Grey (little XP): ", "Red Linen Goods",
+        "Need a group: ", "The Defias Brotherhood|r|cffaaaaaa (elite)", "Far away: ", "Far Errand|r|cffaaaaaa (Teldrassil" },
+        { "Scout Redridge" })
+    local from = #output + 1
+    ask("hand in route", { "Hand-in route (3 quests, ", "1. |cffffd100Gryan Stoutmantle|r, 68 yds",
+        "2. |cffffd100Martie Jainrose|r", "3. |cffffd100Jannok Breezesong|r", "by boat" })
+    ask("turn in bounty on murlocs", "Bounty on Murlocs", { "Hand-in route" }) -- still a quest question
+    ask("what now", "[+2 more]")
+
+    questLog[104].complete, questLog[125] = false, nil
+    C_QuestLog.GetInfo, C_QuestLog.GetNumQuestLogEntries, C_QuestLog.GetQuestTagInfo = savedInfo, savedNum, nil
+end
+ask("tidy quest log", { "Quest log: 3 of 20. Could drop:", "Grey (little XP): " }, { "Need a group", "Far away" })
 ask("zones for level 14", { "Where to quest at level 14:", "Westfall|r: 2 yours + 4 new" },
     { "Too Easy" })
 ask("where should i quest next?", { "Where to quest at level 20:", "Redridge Mountains", "Quests you can pick up",
