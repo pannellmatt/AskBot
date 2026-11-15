@@ -157,6 +157,12 @@ local npcs = {
     [24] = { "Thork", nil, 2, "H", { [BAR] = { { 51, 30 } } } },                -- Horde quest giver
     [25] = { "Chain Giver", nil, 2, "A", { [DM] = { { 40, 40 } } } },
     [12144] = { "Lunaclaw Spirit", nil, 0, nil, {} },                           -- summoned: no spawns
+    -- Beasts for skinning (by name); the Pathstalker is a Defias, not a beast
+    [31] = { "Coyote", nil, 0, nil, { [W] = { { 60, 20 }, { 62, 22 }, { 64, 24 } } }, 14, 15 },
+    [32] = { "Black Bear", nil, 0, nil, { [RR] = { { 30, 30 } } }, 15, 16 },
+    [33] = { "Defias Pathstalker", nil, 0, nil, { [RR] = { { 31, 31 }, { 32, 32 }, { 33, 33 }, { 34, 34 } } }, 15, 16 },
+    [34] = { "Elder Wolf", nil, 0, nil, { [W] = { { 50, 50 } } }, 40, 41 },     -- too high to skin
+    [35] = { "Grey Thing", nil, 0, nil, { [W] = { { 70, 30 } } }, 14, 15 },      -- a beast only the game knows
     [641] = { "Goblin Woodcarver", nil, 0, nil, { [1581] = { { -1, -1 } } }, 18, 19 }, -- inside the Deadmines
     [5676] = { "Summoned Voidwalker", nil, 0, nil, {} },
     [376] = { "High Priestess Laurena", "Priest Trainer", 16, "A", { [SW] = { { 49.5, 44.6 } } } },
@@ -266,6 +272,7 @@ local items = {
     [9020] = { name = "Grills' Girdle", npcDrops = { 20 } },               -- dropped by a rare in Westfall
     [9022] = { name = "Spell Ring" },
     [5771] = { name = "Pattern: Red Linen Bag", vendors = { 12 } },          -- a recipe sold by the Thread Seller
+    [2406] = { name = "Pattern: Fine Leather Boots", vendors = { 12 } },
     [9004] = { name = "Silver Ring" },
 }
 local objects = { [500] = { "Wanted Poster", { [W] = { { 53, 52 } } } }, [501] = { "Shrine of Remulos", { [W] = { { 20, 80 } } } },
@@ -427,9 +434,24 @@ AtlasLoot = {
                 { name = "Edwin VanCleef", npcID = 639, [1] = { { 1, 5193 }, { 2, 5202 }, { 3, 10399 } } },
             },
         },
-    } } },
+    },
+        AtlasLootClassic_Crafting = {
+            Leatherworking = { name = "Leatherworking", items = {
+                { name = "Armor", [1] = { { 1, 2149 }, { 2, 2153 }, { 3, 2158 }, { 4, 2161 } } } } },
+        },
+    } },
     Loader = { LoadModule = function(_, name, onLoad) onLoad(name); return true end },
-    Data = { Droprate = { GetData = function(_, npc, item) return rates[npc] and rates[npc][item] end } },
+    Data = {
+        Droprate = { GetData = function(_, npc, item) return rates[npc] and rates[npc][item] end },
+        -- [spell] = { createdItem, profession (3 = Leatherworking), learn, yellow, grey, reagents, counts }
+        Profession = { GetProfessionData = function(spell) return ({
+            [2149] = { 2302, 3, 1, 40, 70, { 2318, 2320 }, { 2, 1 } },     -- Handstitched Leather Boots (trainer)
+            [2153] = { 2303, 3, 30, 45, 75, { 2318, 2320 }, { 4, 1 } },    -- Handstitched Leather Pants (trainer)
+            [2158] = { 2307, 3, 90, 120, 160, { 2318, 2320 }, { 5, 2 } },  -- Fine Leather Boots (pattern)
+            [2161] = { 2309, 3, 55, 85, 125, { 2318 }, { 6 } },           -- Embossed Leather Boots (trainer, later)
+        })[spell] end },
+        Recipe = { GetRecipeForSpell = function(spell) return ({ [2158] = 2406 })[spell] end },
+    },
 }
 
 -- Auctionator: a price database, and a search that finds `ahListings` while the AH is open
@@ -912,10 +934,48 @@ do
     ask("how do i level skinning", "I can't read your Skinning skill here", { "You don't have" })
     function GetProfessions() return 1, nil, nil, nil, nil end
     function GetProfessionInfo(i) return "Skinning", "icon", 60, 75 end
-    ask("how do i level skinning", "Skinning 60: you can skin beasts up to level 16")
+    ask("how do i level skinning", { "Skinning 60: you can skin beasts up to level 16. Most skill-ups from level 12-16:",
+        "1. |cffffd100Westfall|r: Coyote - ", "2. |cffffd100Redridge Mountains|r: Black Bear" }, { "Pathstalker", "Elder Wolf" })
     GetProfessions, GetProfessionInfo = nil, nil
     GetSkillLineInfo, GetNumSkillLines = getInfo, getNum
 end
+-- AtlasLoot's crafting data: every recipe, known or not
+for id, name in pairs({ [2302] = "Handstitched Leather Boots", [2303] = "Handstitched Leather Pants",
+    [2307] = "Fine Leather Boots", [2309] = "Embossed Leather Boots", [2318] = "Light Leather" }) do
+    itemCache[id] = name
+end
+if AskBot.Crafts.status ~= "ready" then failures = failures + 1; print("   !! FAIL: crafts " .. AskBot.Crafts.status) end
+skillLines[#skillLines + 1] = { "Leatherworking", false, 35 }
+ask("how do i level leatherworking", { "Leatherworking 35: cheapest skill-ups:",
+    "[Handstitched Leather Boots]|r |cffff8040orange|r - mats 10c+ learn: ", "[Leatherworking trainer]",
+    "[Handstitched Leather Pants]|r |cffff8040orange|r", "New trainer recipes at 55." }, { "Fine Leather Boots", "Embossed" })
+ask("recipe for fine leather boots", { "[Fine Leather Boots]|r (Leatherworking 90): learn it from",
+    "Pattern: Fine Leather Boots", "Thread Seller" })
+ask("how do i learn handstitched leather pants", "(Leatherworking 30): taught by trainers.")
+ask("mats for 2 fine leather boots", { "[Fine Leather Boots]|r x2 (Leatherworking):", "10 |cffffffff[Light Leather]|r: buy 10",
+    "You don't know it yet (Leatherworking 90), learn: " })
+table.remove(skillLines)
+
+-- Beasts you meet: the game says "Coyote" isn't one here, and "Grey Thing" is
+do
+    local saved = { UnitExists, UnitGUID, UnitIsPlayer, UnitCreatureType }
+    local targetGuid, targetType
+    UnitExists = function(u) if u == "target" then return targetGuid ~= nil end return saved[1](u) end
+    UnitGUID = function(u) if u == "target" then return targetGuid end return saved[2](u) end
+    UnitIsPlayer = function() return false end
+    UnitCreatureType = function() return targetType end
+    targetGuid, targetType = "Creature-0-1-0-1-31-0000AAAA", "Humanoid"
+    fire("PLAYER_TARGET_CHANGED")
+    targetGuid, targetType = "Creature-0-1-0-1-35-0000BBBB", "Beast"
+    fire("PLAYER_TARGET_CHANGED")
+    targetGuid = nil
+    skillLines[#skillLines + 1] = { "Skinning", false, 60 }
+    ask("how do i level skinning", { "|cffffd100Westfall|r: Grey Thing" }, { "Coyote" })
+    table.remove(skillLines)
+    UnitExists, UnitGUID, UnitIsPlayer, UnitCreatureType = saved[1], saved[2], saved[3], saved[4]
+    AskBotDB.creatureTypes = nil
+end
+
 -- The modern profession API (no classic trade skill functions): a Cooking window
 do
     local classic = { GetTradeSkillLine, GetNumTradeSkills, GetTradeSkillInfo }

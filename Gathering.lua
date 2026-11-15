@@ -82,3 +82,27 @@ function AskBot.GatherNodeFor(name)
         return node
     end
 end
+
+-- Skinning: Questie has no creature types, so beasts are recognised by whole words in their
+-- names ("Coyote", "Black Bear", "Moonstalker Sire"). A guess, but a good one for levelling.
+local BEAST_WORDS = {}
+for w in ([[wolf wolves worg bear boar raptor spider crocolisk lion panther tiger leopard lynx prowler stalker
+    moonstalker hyena kodo strider plainstrider tallstrider basilisk scorpid serpent stag gorilla ape yeti hawk
+    thunderhawk lizard threshadon ravager bat vulture buzzard condor crawler turtle tortoise shardtooth coyote jackal
+    mastiff giraffe zhevra gazelle cat moose mammoth rhino chimaera hippogryph owl snapjaw cougar screecher carrion
+    tarantula sabercat nightsaber frostsaber tusker bloodfang bonepaw boars bears raptors spiders crocolisks lions
+    panthers tigers hyenas kodos striders basilisks scorpids serpents stags gorillas apes yetis hawks lizards bats
+    vultures buzzards condors crawlers turtles cats owls]]):gmatch("%a+") do BEAST_WORDS[w] = true end
+local NOT_BEAST = { rider = true, druid = true, shaman = true, warrior = true, mage = true, priest = true,
+    trapper = true, hunter = true, master = true, keeper = true, tamer = true, handler = true, guard = true,
+    elemental = true, spirit = true, totem = true, trainer = true, defias = true, murloc = true, gnoll = true }
+
+--- Is this NPC name a (probably skinnable) beast?
+function AskBot.IsBeastName(name)
+    local beast = false
+    for w in name:lower():gsub("'", ""):gmatch("%a+") do
+        if NOT_BEAST[w] then return false end
+        if BEAST_WORDS[w] then beast = true end
+    end
+    return beast
+end

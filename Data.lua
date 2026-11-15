@@ -20,6 +20,7 @@ local D = {
     gearItems = {},     -- list of { itemId, requiredLevel } for weapons and armour
     rares = {},         -- npc id -> rank (2 = rare elite, 4 = rare)
     rareDrops = {},     -- rare npc id -> list of gear item ids it drops
+    beasts = {},        -- npc ids of hostile, non-elite beasts (by name), for skinning
     recipeItems = {},   -- list of { key of what it teaches, item id, recipe name, kind ("Pattern") }
     gather = {},        -- node name -> { name, prof, skill, special, items, ids }
     gatherKeys = {},    -- name key (node or item) -> { display, nodes = { node names } }
@@ -388,6 +389,10 @@ function D.BuildIndex()
         local id = npcIds[i]
         local rank = NpcDB.rank(id)
         if rank == 2 or rank == 4 then D.rares[id] = rank end
+        if rank == 0 and not NpcDB.friendlyToFaction(id) then
+            local name = NpcDB.name(id)
+            if name and AskBot.IsBeastName(name) then D.beasts[#D.beasts + 1] = id end
+        end
         local flags = NpcDB.npcFlags(id)
         local sub = NpcDB.subName(id)
         if (flags and flags > 0) or sub then

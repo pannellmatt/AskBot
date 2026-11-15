@@ -135,6 +135,123 @@ function Loot.Build()
     Loot.status = "ready"
 end
 
+--------------------------------------------------------------------------------------------
+-- AtlasLoot crafting data: every craft with its skill colours, reagents and recipe item
+--------------------------------------------------------------------------------------------
+
+local Crafts = {
+    status = "absent", -- absent | loading | ready
+    bySpell = {},      -- spell id -> craft
+    byProf = {},       -- profession name -> list of crafts
+    list = {},
+}
+AskBot.Crafts = Crafts
+
+-- AtlasLoot's profession numbers
+local PROF_NAMES = { [1] = "First Aid", [2] = "Blacksmithing", [3] = "Leatherworking", [4] = "Alchemy",
+    [6] = "Cooking", [8] = "Tailoring", [9] = "Engineering", [10] = "Enchanting", [13] = "Poisons" }
+
+--- craft = { spell, item, made, prof, learn, yellow, green, grey, reagents = { { id, count } }, recipe }
+--- (skill colours: orange from `learn`, yellow from `yellow`, green from `green`, grey from `grey`).
+local function makeCraft(spell, data, Recipe)
+    local prof = PROF_NAMES[data[2]]
+    if not prof then return nil end
+    local c = { spell = spell, item = data[1], made = data[8] or 1, prof = prof, learn = data[3] or 1,
+        yellow = data[4] or 0, grey = data[5] or 0, reagents = {} }
+    c.green = math.floor((c.yellow + c.grey) / 2)
+    for i, id in ipairs(data[6] or {}) do
+        c.reagents[#c.reagents + 1] = { id = id, count = (data[7] and data[7][i]) or 1 }
+    end
+    if Recipe and Recipe.GetRecipeForSpell then
+        local ok, r = pcall(Recipe.GetRecipeForSpell, spell)
+        if ok and type(r) == "number" then c.recipe = r end
+    end
+    return c
+end
+
+--- Index AtlasLoot's crafting module. Runs as a coroutine.
+function Crafts.Build()
+    local AL = _G.AtlasLoot
+    local P = AL and AL.Data and AL.Data.Profession
+    if not (AL and AL.ItemDB and AL.ItemDB.Storage and AL.Loader and P and P.GetProfessionData) then
+        Crafts.status = "absent"
+        return
+    end
+    Crafts.status = "loading"
+    local name = "AtlasLootClassic_Crafting"
+    local loaded = false
+    local result = AL.Loader:LoadModule(name, function() loaded = true end)
+    if result == true then loaded = true end
+    if result == nil or result == "DISABLED" or result == "MISSING" then Crafts.status = "absent"; return end
+    while loaded == false do coroutine.yield() end
+
+    local mod = AL.ItemDB.Storage[name]
+    if type(mod) ~= "table" then Crafts.status = "absent"; return end
+    local Recipe = AL.Data.Recipe
+    for key, prof in pairs(mod) do
+        if type(key) == "string" and key:sub(1, 2) ~= "__" and type(prof) == "table" and type(prof.items) == "table" then
+            for _, group in ipairs(prof.items) do
+                for diff, list in pairs(type(group) == "table" and group or {}) do
+                    if type(diff) == "number" and type(list) == "table" then
+                        for _, entry in ipairs(list) do
+                            local spell = type(entry) == "table" and entry[2]
+                            if type(spell) == "number" and not Crafts.bySpell[spell] then
+                                local ok, data = pcall(P.GetProfessionData, spell)
+                                local c = ok and type(data) == "table" and makeCraft(spell, data, Recipe)
+                                if c then
+                                    Crafts.bySpell[spell] = c
+                                    Crafts.list[#Crafts.list + 1] = c
+                                    local l = Crafts.byProf[c.prof]
+                                    if not l then l = {}; Crafts.byProf[c.prof] = l end
+                                    l[#l + 1] = c
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            coroutine.yield()
+        end
+    end
+    Crafts.status = "ready"
+end
+
+--- A craft's name: what it makes, or the spell's name (enchants).
+function Crafts.Name(c)
+    if c.name then return c.name end
+    local n = c.item and ((C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(c.item)) or ItemDB.name(c.item))
+    if not n then
+        local getSpell = (C_Spell and C_Spell.GetSpellName) or GetSpellInfo
+        n = getSpell and getSpell(c.spell)
+    end
+    c.name = n
+    return n
+end
+
+--- Crafts called `name` (exact first, then containing it).
+function Crafts.Find(name)
+    local key = D.NameKey(name)
+    local exact, partial = {}, {}
+    for _, c in ipairs(Crafts.list) do
+        local n = Crafts.Name(c)
+        local k = n and D.NameKey(n)
+        if k == key then exact[#exact + 1] = c
+        elseif k and k:find(key, 1, true) then partial[#partial + 1] = c end
+    end
+    return #exact > 0 and exact or (#partial > 0 and partial or nil)
+end
+
+--- "orange" | "yellow" | "green" | "grey" | "unlearnable" (below `learn`) | nil (no colour data).
+function Crafts.Colour(c, skill)
+    if not skill then return nil end
+    if skill < c.learn then return "unlearnable" end
+    if c.yellow <= 0 or c.grey <= 0 then return nil end
+    if skill < c.yellow then return "orange" end
+    if skill < c.green then return "yellow" end
+    if skill < c.grey then return "green" end
+    return "grey"
+end
+
 --- A place for the instance's entrance(s), from Questie's dungeon table, or nil.
 function Loot.EntrancePlace(instance)
     if instance.entrance ~= nil then return instance.entrance or nil end

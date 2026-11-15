@@ -78,11 +78,12 @@ AskBot compares what you're wearing with gear you can get soon: rewards from que
 The nearest node, the zones with the most nodes, and whether your skill is high enough (coloured like the game's skill-up colours).
 
 ### Professions
-Open each profession window once so AskBot can read your recipes; it keeps them up to date whenever you open it again.
+With **AtlasLoot** installed, AskBot knows every recipe: what it makes, its reagents, the skill it's orange, yellow, green and grey at, and the pattern, plan or formula that teaches it. Without AtlasLoot, open each profession window once so AskBot can read the recipes you know. Either way, opening the window tells AskBot which recipes you've already learned.
 
 - `/ab recipe for Linen Bag` (or `how do I learn …`, `pattern for …`, `where do I get the plans for …`): where to get the pattern, plan, formula or recipe: vendors, drops and quests, with pins. If no recipe item teaches it, a trainer does.
 - `/ab mats for 5 Linen Bag` (or `what do I need to make …`, `shopping list for …`): each reagent with how many you have and how many to buy, vendor or AH prices *(with Auctionator)*, the total, and whether crafting beats buying the item.
-- `/ab how do I level tailoring` (or `tailoring skill ups`, `what should I craft`): your orange and yellow recipes, cheapest mats first, and a nudge to the trainer at your skill cap. Mining and herbalism suggest the best nodes for your skill; skinning says the highest level you can skin.
+- `/ab how do I level tailoring` (or `tailoring skill ups`, `what should I craft`): the orange and yellow recipes at your skill (ones you know first, then trainer recipes, then patterns to find), cheapest mats first, when the trainer has new recipes, and a nudge at your skill cap. Mining and herbalism suggest the best nodes for your skill.
+- **Skinning:** the highest level you can skin, and the zones with the most beasts in your skill-up range, with pins. Beasts are recognised by name and corrected by what the game tells AskBot about mobs you target or mouse over.
 
 - `/ab where can I mine copper` (or `/ab copper ore`, `/ab tin nodes`)
 - `/ab Peacebloom` (or `/ab where can I pick Kingsblood`)
