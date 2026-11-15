@@ -1,2 +1,5 @@
 # Built zips (published as GitHub release assets instead)
 dist/
+
+# Local session notes (names the local account folder)
+HANDOFF.md
