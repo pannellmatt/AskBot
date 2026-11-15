@@ -393,6 +393,8 @@ gear = {
     [9020] = { "Grills' Girdle", "INVTYPE_WAIST", 4, 3, 19, 24, { ITEM_MOD_STRENGTH_SHORT = 4 } },
     [9021] = { "Heavy Plate Helm", "INVTYPE_HEAD", 4, 4, 20, 25, { ITEM_MOD_STAMINA_SHORT = 6 } },
     [9022] = { "Spell Ring", "INVTYPE_FINGER", 4, 0, 18, 22, {} },          -- its only stat is an Equip: line
+    [9014] = { "Ragged Leather Boots", "INVTYPE_FEET", 4, 2, 1, 5, { RESISTANCE0_NAME = 16 } },
+    [9015] = { "Flimsy Chain Boots", "INVTYPE_FEET", 4, 3, 1, 5, { RESISTANCE0_NAME = 34 } },
 }
 -- Tooltip lines (C_TooltipInfo) for items whose bonuses only show as "Equip:" text
 local tooltips = { [9022] = { "Spell Ring", "Equip: Increases damage and healing done by magical spells and effects by up to 7." } }
@@ -1102,6 +1104,16 @@ talents = { 6, 4, 0 }
 ask("bag upgrades", "for Warrior (talents unclear, scored as Arms)")
 ask("bag upgrades as fury", "Upgrades in your bags for Fury Warrior:")
 talents = savedTalents
+-- Armour-only boots: a tiny score, but more than twice as good
+equipped[8] = 9014
+bagItems = { 9015 }
+ask("anything in my bag an upgrade", { "[Flimsy Chain Boots]", "(Feet): +113% over", "[Ragged Leather Boots]" })
+-- Level 5: the game reports no talent trees yet
+local realTabs, realLevel = GetNumTalentTabs, units.player[4]
+GetNumTalentTabs, units.player[4] = function() return 0 end, 5
+ask("anything in my bag an upgrade", "for Warrior (no talents yet, scored as Arms)", { "spec unknown" })
+GetNumTalentTabs, units.player[4] = realTabs, realLevel
+equipped[8] = nil
 bagItems = { 9005, 9030 }
 ask("any upgrades in my bags?", "Nothing in your bags beats what you wear for Arms Warrior")
 bagItems = { 9030 }

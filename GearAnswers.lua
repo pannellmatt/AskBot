@@ -255,15 +255,18 @@ local function verdictExtra(r, level)
 end
 
 --- "Arms Warrior", or when Gear.Spec only guessed: "Warrior (no talents yet, scored as Arms)".
-local function specLabel(spec, how, summary, className)
+local function specLabel(spec, how, summary, className, level)
     if how ~= "guess" then return spec.name .. " " .. className end
-    local why = (summary and summary:find("[1-9]") and "talents unclear") or (summary and "no talents yet") or "spec unknown"
+    -- Talents start at 10; below that the game may report no talent trees at all.
+    local why = (summary and summary:find("[1-9]") and "talents unclear")
+        or ((summary or (level and level < 10)) and "no talents yet") or "spec unknown"
     return className .. " (" .. why .. ", scored as " .. spec.name .. ")"
 end
 
---- Does a Gear.Compare result beat what you wear by enough to matter?
+--- Does a Gear.Compare result beat what you wear by enough to matter? Half a point and 3%,
+--- or 25% better even if the scores are tiny (low-level gear with only armour on it).
 local function beatsWorn(r)
-    return r.gain > math.max(0.5, r.current * 0.03)
+    return r.gain > math.max(0.5, r.current * 0.03) or (r.gain > 0 and r.gain >= r.current * 0.25)
 end
 
 --- One line on whether item `id` beats what you wear: "[Item] (Legs): upgrade, +35% over
@@ -284,7 +287,7 @@ local function upgradeVerdict(id, words)
     local extra = verdictExtra(r, level)
     if not r.score then return head .. "I couldn't read its stats yet, ask again in a moment." end
     if not r.gain then return head .. "you wield a two-hander, so an off hand doesn't fit." .. extra end
-    local forWho = " for " .. specLabel(spec, how, summary, className)
+    local forWho = " for " .. specLabel(spec, how, summary, className, level)
     if r.currentLink and r.currentLink:find("item:" .. id .. ":", 1, true) then
         return head .. "you're wearing it."
     end
@@ -350,7 +353,7 @@ local function answerBagUpgrades(words)
                     found[#found + 1] = { id = id, r = r, pct = r.current > 0 and r.gain / r.current or math.huge }
                 end
             end
-            local forWho = specLabel(spec, how, summary, UnitClass("player") or classFile)
+            local forWho = specLabel(spec, how, summary, UnitClass("player") or classFile, level)
             if #found == 0 then
                 return say("Nothing in your bags beats what you wear for " .. forWho .. GREY .. " (" .. #ids .. " item"
                     .. (#ids == 1 and "" or "s") .. " checked).|r")
