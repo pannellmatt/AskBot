@@ -25,7 +25,9 @@ Built for **World of Warcraft: Forever**.
 - `/ab my quests`: everything in your quest log that's ready to hand in, then the nearest unfinished objectives across all your quests.
 - `/ab hand in route`: every quest that's ready to hand in, as a route that always goes to the nearest stop next.
 - `/ab which quests should I abandon` (or `/ab tidy quest log`): grey quests, quests that need a group (elite, dungeon) and quests whose next step is far away.
-- `/ab quests here`: quests you can pick up, nearest first, grouped by who gives them and coloured by difficulty. AskBot uses Questie's own checks, so completed quests, missing prerequisites, quests for other classes and grey quests are all left out.
+- `/ab best quests` (or `which quests give the most xp`): the quests in your log and the nearest ones you can pick up, ranked by XP per minute. The XP is Questie's real Forever figure for your level. The minutes are a rough estimate: travel to the quest giver, the objectives (kills, items that drop, things to click, what you've already done) and the walk back. Quests well above your level are left out.
+- `/ab quests near The Grizzled Den` (or `what else can I do near …`): other quests whose objectives are in the same spot, ones to pick up (with their XP and a pin on the giver) and ones already in your log. Asking who gives a quest also adds a "Same area:" line, so you can grab them together.
+- `/ab quests here`: quests you can pick up, nearest first, grouped by who gives them and coloured by difficulty, with their XP. AskBot uses Questie's own checks, so completed quests, missing prerequisites, quests for other classes and grey quests are all left out.
 - `/ab dungeons` (or `/ab dungeons for level 25`): dungeons that suit your level, with entrance pins and a link to their loot *(with AtlasLoot)*.
 - `/ab what do I need before Deadmines` (or `/ab SFK quests`, `/ab prep for Gnomeregan`): the dungeon's entrance and the quests to pick up before you go, grouped by quest giver. Quests for later levels, quests that aren't available yet (with links explaining why) and the dungeon's quests your group already has are listed too. Class quests with an objective inside count. Short names such as VC, SFK, BFD, RFK and ZF work.
 - `/ab rares`: the nearest rare and rare-elite mobs, with their levels.
@@ -44,7 +46,7 @@ Profession and class trainers, weapon masters, pet trainers, flight masters, inn
 Shift-click a quest into the command, or type its name.
 
 - **A quest in your log:** the nearest place for each objective you haven't finished, then where to hand it in.
-- **A quest you don't have:** who gives it, with its level.
+- **A quest you don't have:** who gives it, with its level and XP, and other quests whose objectives are in the same spot.
 - **Gaps in Questie's data are filled in:** mobs inside dungeons point to the entrance, quest items you've lost point to whoever hands them out, and class quests get community locations where Questie has none, e.g. the Moonkin Stone for the druid bear form, the warlock summoning circles, and Forever's new shaman Call of Water spots. These are marked *(community info)*.
 
 **Quest chains:** when a quest you expect isn't showing up, it's usually waiting on an earlier one.
@@ -156,7 +158,7 @@ Thor <Gryphon Master> - Westfall 56.6, 52.6 (71 yds, <1 min)
 - **Pins for them too:** each answer carries the game's own `[Map Pin Location]` link, which anyone can click to put the spot on their map, no addon needed.
 - **No spam:** it's off by default, answers are at most four lines, and there's a cooldown per person.
 - **Several AskBots:** when more than one guild member runs AskBot, only one of them answers.
-- **Questions about your own character:** "what should I do", "my quests", "hand in route", "tidy quest log", "quests here", gear upgrades, bag upgrades, skills to train, mats lists, profession skill-up plans and your hearthstone need the asker's own quest log, gear, bags or trainer list, so they only work with `/ab`.
+- **Questions about your own character:** "what should I do", "my quests", "hand in route", "tidy quest log", "quests here", "best quests", "quests near …", gear upgrades, bag upgrades, skills to train, mats lists, profession skill-up plans and your hearthstone need the asker's own quest log, gear, bags or trainer list, so they only work with `/ab`.
 
 ## Settings
 
