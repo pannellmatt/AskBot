@@ -29,14 +29,16 @@ Built for **World of Warcraft: Forever**.
 - `/ab dungeons` (or `/ab dungeons for level 25`): dungeons that suit your level, with entrance pins and a link to their loot *(with AtlasLoot)*.
 - `/ab what do I need before Deadmines` (or `/ab SFK quests`, `/ab prep for Gnomeregan`): the dungeon's entrance and the quests to pick up before you go, grouped by quest giver. Quests for later levels, quests that aren't available yet (with links explaining why) and the dungeon's quests your group already has are listed too. Class quests with an objective inside count. Short names such as VC, SFK, BFD, RFK and ZF work.
 - `/ab rares`: the nearest rare and rare-elite mobs, with their levels.
+- `/ab what skills can I learn` (or `what can I train`, `spells I can learn`): class spells ready to train at your level with the total cost, a pin on the nearest class trainer, and what comes at your next training level. AskBot reads the list from your class trainer's window, so open it once first; spells you learn are ticked off.
 
 ### Where's the nearest...?
-Profession and class trainers, weapon masters, pet trainers, flight masters, innkeepers, bankers, auctioneers, stable masters and repair vendors. Only NPCs friendly to your faction are shown.
+Profession and class trainers, weapon masters, pet trainers, flight masters, innkeepers, bankers, auctioneers, stable masters, repair vendors and any vendor. Only NPCs friendly to your faction are shown.
 
 - `/ab where is my nearest skinning trainer`
 - `/ab nearest fp`
 - `/ab where's my class trainer`
 - `/ab closest inn`
+- `/ab where is my nearest vendor` (or `merchant`)
 
 ### Quests
 Shift-click a quest into the command, or type its name.
@@ -72,14 +74,19 @@ AskBot compares what you're wearing with gear you can get soon: rewards from que
 
 - `/ab upgrades` (or `what gear should I get`, `better weapon`, `upgrades legs`)
 - `/ab what boss drops are good for me` (or `upgrades from dungeons`, `upgrades from quests`, `AH upgrades`): one kind of source only. The dungeon version also ranks dungeons by how many upgrades they hold.
-- **Your spec** comes from your talents. Name one to override it: `/ab upgrades as tank`, `I'm a feral druid, what gear should I go for`.
+- **Your spec** comes from your talents. Before you've spent any (or when two trees are close), AskBot uses a common levelling spec and says so, e.g. *for Warrior (no talents yet, scored as Arms)*. Name a spec to override it: `/ab upgrades as tank`, `I'm a feral druid, what gear should I go for`.
 - **Not usable yet?** Items you'll be able to use are still listed, marked e.g. *(at 26)*, *(Plate Mail at 40)* or *(train Two-Handed Axes)* with a link to the nearest weapon master.
 - `/ab is [item] an upgrade?` (or `is Militia Leggings better`, `should I use [item]`, `[item] upgrade as tank`): one item against what you're wearing, e.g. *+35% over [Worn Leggings]*, or why your class can't use it.
+- `/ab anything in my bags an upgrade?` (or `any upgrades in my bags`, `bag upgrades as tank`): every piece of gear in your bags that beats what you're wearing, biggest gain first.
 - **Rare alerts:** when you enter a zone, AskBot says if a rare mob near your level there can drop an upgrade for you, with a pin. Turn it off in `/ab options`.
 - Items are scored with simple stat weights per spec, so treat the list as a guide. Bonuses that only appear as "Equip:" lines (spell damage, attack power, hit, crit, mana regen) are read from the item's tooltip. `/ab debug item [item]` shows an item's stats and score.
 
 ### Mining, herbs and fishing schools
 The nearest node, the zones with the most nodes, and whether your skill is high enough (coloured like the game's skill-up colours).
+
+- `/ab where can I mine copper` (or `/ab copper ore`, `/ab tin nodes`)
+- `/ab Peacebloom` (or `/ab where can I pick Kingsblood`)
+- `/ab where should I mine` / `/ab where should I level herbalism`: the best node for your current skill, and what opens up next.
 
 ### Professions
 With **AtlasLoot** installed, AskBot knows every recipe: what it makes, its reagents, the skill it's orange, yellow, green and grey at, and the pattern, plan or formula that teaches it. Without AtlasLoot, open each profession window once so AskBot can read the recipes you know. Either way, opening the window tells AskBot which recipes you've already learned.
@@ -88,10 +95,6 @@ With **AtlasLoot** installed, AskBot knows every recipe: what it makes, its reag
 - `/ab mats for 5 Linen Bag` (or `what do I need to make …`, `shopping list for …`): each reagent with how many you have and how many to buy, vendor or AH prices *(with Auctionator)*, the total, and whether crafting beats buying the item.
 - `/ab how do I level tailoring` (or `tailoring skill ups`, `what should I craft`): the orange and yellow recipes at your skill (ones you know first, then trainer recipes, then patterns to find), cheapest mats first, when the trainer has new recipes, and a nudge at your skill cap. Mining and herbalism suggest the best nodes for your skill.
 - **Skinning:** the highest level you can skin, and the zones with the most beasts in your skill-up range, with pins. Beasts are recognised by name and corrected by what the game tells AskBot about mobs you target or mouse over.
-
-- `/ab where can I mine copper` (or `/ab copper ore`, `/ab tin nodes`)
-- `/ab Peacebloom` (or `/ab where can I pick Kingsblood`)
-- `/ab where should I mine` / `/ab where should I level herbalism`: the best node for your current skill, and what opens up next.
 
 ### Dungeon loot and drop rates *(with AtlasLoot)*
 What a boss drops, with drop rates, plus a pin on the dungeon entrance.
@@ -153,7 +156,7 @@ Thor <Gryphon Master> - Westfall 56.6, 52.6 (71 yds, <1 min)
 - **Pins for them too:** each answer carries the game's own `[Map Pin Location]` link, which anyone can click to put the spot on their map, no addon needed.
 - **No spam:** it's off by default, answers are at most four lines, and there's a cooldown per person.
 - **Several AskBots:** when more than one guild member runs AskBot, only one of them answers.
-- **Quest log questions:** "what should I do", "my quests", "hand in route", "tidy quest log" and "quests here" need the asker's own quest log, so they only work with `/ab`.
+- **Questions about your own character:** "what should I do", "my quests", "hand in route", "tidy quest log", "quests here", gear upgrades, bag upgrades, skills to train, mats lists, profession skill-up plans and your hearthstone need the asker's own quest log, gear, bags or trainer list, so they only work with `/ab`.
 
 ## Settings
 
