@@ -18,7 +18,8 @@ local questLogEntries, questLabel = AskBot.Quests.questLogEntries, AskBot.Quests
 local questGivers, joinSome = AskBot.Quests.questGivers, AskBot.Quests.joinSome
 local groupUnits = AskBot.Quests.groupUnits
 local askerClass, targetsById = Out.askerClass, Out.targetsById
-local friendlyPlaces = AskBot.Quests.friendlyPlaces
+local friendlyPlaces, questXP = AskBot.Quests.friendlyPlaces, AskBot.Quests.questXP
+local resolveQuest, questObjectives = AskBot.Quests.resolveQuest, AskBot.Quests.questObjectives
 
 --------------------------------------------------------------------------------------------
 -- Levelling helper: what's next, quests near me, dungeons for my level, rares
@@ -109,7 +110,8 @@ local function giverLine(g, maxQuests)
     local names = {}
     for j, id in ipairs(g.quests) do
         if j > maxQuests then names[#names + 1] = GREY .. "+" .. (#g.quests - maxQuests) .. "|r"; break end
-        names[#names + 1] = questLabel(id)
+        local xp = questXP(id)
+        names[#names + 1] = questLabel(id) .. (xp and (GREY .. " " .. xp .. "xp|r") or "")
     end
     return GOLD .. g.r.place.name .. "|r, " .. shortHow(g.r) .. " " .. pinLink(g.r.place, g.r.spawn, "quests")
         .. ": " .. table.concat(names, ", ")
@@ -874,6 +876,252 @@ local function answerTraining()
 end
 AskBot.RecordTraining, AskBot.LearnedSpell = recordTraining, learnedSpell
 
+--------------------------------------------------------------------------------------------
+-- Quest picks: XP per minute, and quests whose objectives share a spot
+--------------------------------------------------------------------------------------------
+
+-- Rough effort: seconds per kill, per click (objects, items you're handed), the chance a
+-- quest item drops when Questie has no rate, and how close objectives count as one spot.
+local KILL_TIME, CLICK_TIME, DROP_CHANCE, NEAR_YARDS = 30, 20, 0.4, 300
+
+--- How many of `name` the quest's objective text asks for ("Gather 8 Wendigo Manes" -> 8), else 1.
+local function objectiveCount(id, name)
+    local texts = QuestDB.objectivesText and QuestDB.objectivesText(id)
+    local text = (type(texts) == "table" and table.concat(texts, " ")) or (type(texts) == "string" and texts) or ""
+    text = text:lower()
+    -- The name's longest word, shortened a letter so plurals match ("mane" in "manes").
+    local key = ""
+    for w in (name or ""):lower():gmatch("%a+") do if #w > #key then key = w end end
+    if #key < 3 then return 1 end
+    local pos = text:find(key:sub(1, math.max(3, #key - 1)), 1, true)
+    if not pos then return 1 end
+    local n
+    for d in text:sub(math.max(1, pos - 30), pos - 1):gmatch("(%d+)") do n = tonumber(d) end
+    return n or 1
+end
+
+--- Seconds of work for one objective (from questObjectives), how many, and a verb.
+local function objectiveWork(id, obj, logObjectives)
+    local count = objectiveCount(id, obj[2])
+    for _, lo in ipairs(logObjectives or {}) do
+        if lo.text and lo.numRequired and lo.text:lower():find(obj[2]:lower(), 1, true) then
+            count = math.max(0, lo.numRequired - (lo.numFulfilled or 0))
+            break
+        end
+    end
+    local verb, first = obj[1], obj[3][1]
+    if count == 0 then return 0, 0 end
+    if verb == "Kill" then return count * KILL_TIME, count, "kill" end
+    if verb == "Collect" or verb == "Make" then
+        if first and first.kind == "npc" and not first.via then return count / DROP_CHANCE * KILL_TIME, count, "loot" end
+        return count * CLICK_TIME, count, "collect"
+    end
+    return CLICK_TIME, 1, verb:lower()
+end
+
+--- Rough seconds to do quest `id` from where you are: fetch it (unless it's in your log), go
+--- to its objectives, do them, hand it in. Also a summary ("kill 10, loot 8") and the first
+--- place to go. nil when Questie can't place it.
+local function questEffort(id, inLog)
+    local secs, first, here = 0, nil, nil
+    if not inLog then
+        local info = D.questInfo[id]
+        local giver = info and D.Rank(placesForIds(info.npcs, info.objects, true))[1]
+        if not (giver and giver.time) then return nil end
+        secs, first, here = giver.time, giver, giver.spawn.point
+    end
+    local parts = {}
+    if not (inLog and questComplete(id)) then
+        local logObjectives = inLog and C_QuestLog and C_QuestLog.GetQuestObjectives and C_QuestLog.GetQuestObjectives(id)
+        local places = {}
+        for _, obj in ipairs(questObjectives(id)) do
+            local work, count, verb = objectiveWork(id, obj, logObjectives)
+            if count > 0 then
+                secs = secs + work
+                parts[#parts + 1] = verb .. (count > 1 and (" " .. count) or "")
+                for _, p in ipairs(obj[3]) do places[#places + 1] = p end
+            end
+        end
+        local spot = #places > 0 and D.Rank(places, here)[1]
+        if spot and spot.time then
+            secs = secs + spot.time
+            first = first or spot
+            here = spot.spawn.point
+        end
+    end
+    local turnIn = D.Rank(turnInPlaces(id), here)[1]
+    if turnIn and turnIn.time then
+        secs = secs + turnIn.time
+        first = first or turnIn
+    end
+    if not first then return nil end
+    if #parts == 0 then parts[1] = inLog and "hand in" or "talk" end
+    return secs, table.concat(parts, ", "), first
+end
+
+--- New quests near you (from the nearest givers) and the ones in your log, as { id, inLog }.
+--- New quests more than 5 levels above you (red) are left out: besides being hard, most are
+--- event or war-effort quests listed at level 60 that anyone can take, whose scaled XP looks huge.
+local function nearbyCandidates(maxNew)
+    local list = {}
+    for _, q in ipairs(questLogEntries()) do list[#list + 1] = { id = q.id, inLog = true } end
+    local n, maxLevel = 0, askerLevel() + 5
+    for _, g in ipairs((questGivers(doableQuests()))) do
+        for _, id in ipairs(g.quests) do
+            if n >= maxNew then return list end
+            if (QuestDB.questLevel(id) or 0) <= maxLevel then
+                list[#list + 1] = { id = id }
+                n = n + 1
+            end
+        end
+    end
+    return list
+end
+
+--- "best quests": quests near you and in your log, by XP per minute of rough effort.
+local function bestQuestsQuestion(q)
+    if q:find("how much", 1, true) then return false end
+    local w = {}
+    for x in q:gmatch("%a+") do w[x] = true end
+    if not (w.quest or w.quests) then return q == "best xp" or q == "xp per minute" end
+    return (w.xp or w.experience or w.efficient or w.quickest or w.fastest or w.best) and true or false
+end
+
+local function answerBestQuests()
+    local rows = {}
+    for _, c in ipairs(nearbyCandidates(25)) do
+        local xp = questXP(c.id)
+        local secs, summary, first = nil, nil, nil
+        if xp then secs, summary, first = questEffort(c.id, c.inLog) end
+        if secs then
+            rows[#rows + 1] = { id = c.id, inLog = c.inLog, xp = xp, secs = math.max(secs, 60), summary = summary,
+                first = first, tag = questTag(c.id) }
+        end
+    end
+    if #rows == 0 then
+        return say("I couldn't rate any quests near you (no XP data or locations for them).")
+    end
+    table.sort(rows, function(a, b)
+        if (a.tag ~= nil) ~= (b.tag ~= nil) then return b.tag ~= nil end
+        return a.xp / a.secs > b.xp / b.secs
+    end)
+    say("Best XP per minute near you (level " .. askerLevel() .. "):")
+    for i = 1, math.min(6, #rows) do
+        local r = rows[i]
+        say("  " .. questLabel(r.id) .. " - " .. r.xp .. " xp, " .. formatTime(r.secs) .. " (" .. r.summary .. ")"
+            .. (r.inLog and (GREY .. " in your log|r") or "") .. (r.tag and (" |cffff8040" .. r.tag .. "|r") or "")
+            .. " " .. pinLink(r.first.place, r.first.spawn, QuestDB.name(r.id) or "quest"))
+    end
+    say(GREY .. "  Rough estimates: travel, ~30 s a kill, quest items dropping 40% of the time.|r")
+    autoPin(rows[1].first.place, rows[1].first.spawn, QuestDB.name(rows[1].id) or "quest")
+end
+
+--- Resolved spawns where quest `id`'s objectives happen (at most 60, spread out).
+local function objectiveSpawns(id)
+    local all = {}
+    for _, o in ipairs(questObjectives(id)) do
+        for _, p in ipairs(o[3]) do
+            if not p.via then
+                for _, s in ipairs(p.spawns or {}) do
+                    if s.wx then all[#all + 1] = s end
+                end
+            end
+        end
+    end
+    if #all <= 60 then return all end
+    local out, step = {}, #all / 60
+    for i = 1, 60 do out[i] = all[math.floor((i - 1) * step) + 1] end
+    return out
+end
+
+--- Closest yards between two spawn lists, or nil if none are on the same continent.
+local function closestYards(a, b)
+    local best
+    for _, s in ipairs(a) do
+        for _, t in ipairs(b) do
+            if s.inst == t.inst then
+                local d = D.SpawnDistance(s, t)
+                if d and (not best or d < best) then best = d end
+            end
+        end
+    end
+    return best
+end
+
+--- Quests near you or in your log whose objectives are within NEAR_YARDS of quest `id`'s,
+--- closest first: { id, inLog, yards }.
+local function sameAreaQuests(id)
+    local mine = objectiveSpawns(id)
+    if #mine == 0 then return {} end
+    local out = {}
+    for _, c in ipairs(nearbyCandidates(40)) do
+        if c.id ~= id then
+            local d = closestYards(mine, objectiveSpawns(c.id))
+            if d and d <= NEAR_YARDS then c.yards = d; out[#out + 1] = c end
+        end
+    end
+    table.sort(out, function(a, b) return a.yards < b.yards end)
+    return out
+end
+
+local answerQuestsNear
+
+--- One line for a quest answer: "Same area: [11] Stocking Jetsteam, [12] ... [list]", or nil.
+local function sameAreaLine(id)
+    if AskBot.asker then return nil end
+    local list = sameAreaQuests(id)
+    if #list == 0 then return nil end
+    local labels = {}
+    for i, c in ipairs(list) do labels[i] = questLabel(c.id) end
+    return GREY .. "  Same area:|r " .. joinSome(labels, 3) .. " "
+        .. makeLink("list", function() answerQuestsNear(nil, id) end)
+end
+
+--- "quests near The Grizzled Den": quests to take (or already have) with objectives in the
+--- same spot, each with its XP and where to get it.
+function answerQuestsNear(query, questId)
+    local id = questId or resolveQuest(query)
+    if not id then return say("I couldn't find a quest called \"" .. tostring(query) .. "\".") end
+    local name = QuestDB.name(id) or ("quest " .. id)
+    if #objectiveSpawns(id) == 0 then
+        if #questObjectives(id) == 0 then
+            return say(GOLD .. name .. "|r has nothing to do out in the world (talk or deliver), so nothing shares its spot.")
+        end
+        return say("Questie doesn't place " .. GOLD .. name .. "|r's objectives, so I can't tell what's near them.")
+    end
+    local list = sameAreaQuests(id)
+    if #list == 0 then return say("No other quests you can do have objectives near " .. GOLD .. name .. "|r.") end
+    say("Quests with objectives near " .. GOLD .. name .. "|r:")
+    for i = 1, math.min(6, #list) do
+        local c = list[i]
+        local xp = questXP(c.id)
+        local where
+        if c.inLog then
+            where = GREY .. "in your log|r"
+        else
+            local info = D.questInfo[c.id]
+            local giver = info and D.Rank(placesForIds(info.npcs, info.objects, true))[1]
+            where = giver and (GREY .. "from|r " .. GOLD .. giver.place.name .. "|r, " .. shortHow(giver) .. " "
+                .. pinLink(giver.place, giver.spawn, QuestDB.name(c.id) or "quest")) or GREY .. "giver unknown|r"
+        end
+        say("  " .. questLabel(c.id) .. (xp and (" - " .. xp .. " xp") or "") .. ", " .. where)
+    end
+    if #list > 6 then say(GREY .. "  ...and " .. (#list - 6) .. " more.|r") end
+end
+
+-- "quests near X" (not "quests near me", which is "quests here").
+local NEAR_PATTERNS = { "^quests near (.+)$", "^quests around (.+)$", "^quests close to (.+)$",
+    "^other quests near (.+)$", "^what else is near (.+)$", "^what else is around (.+)$",
+    "^what else can i do near (.+)$", "^what else can i do with (.+)$", "^what goes with (.+)$",
+    "^quests to do with (.+)$", "^quests that go with (.+)$", "^what can i do with (.+)$" }
+local NOT_A_QUEST = { me = true, here = true, you = true, us = true, xp = true }
+local function questsNearSubject(q)
+    for _, pattern in ipairs(NEAR_PATTERNS) do
+        local s = q:match(pattern)
+        if s and not NOT_A_QUEST[s] then return s end
+    end
+end
+
 -- For the files loaded after this one.
 Levelling.answerQuestLog, Levelling.doableQuests = answerQuestLog, doableQuests
 Levelling.answerQuestsHere, Levelling.currentZoneMap = answerQuestsHere, currentZoneMap
@@ -883,3 +1131,6 @@ Levelling.answerHandInRoute, Levelling.answerRares = answerHandInRoute, answerRa
 Levelling.answerGroup, Levelling.answerPerson = answerGroup, answerPerson
 Levelling.HEARTH_QUESTIONS, Levelling.answerHearth = HEARTH_QUESTIONS, answerHearth
 Levelling.trainingQuestion, Levelling.answerTraining = trainingQuestion, answerTraining
+Levelling.bestQuestsQuestion, Levelling.answerBestQuests = bestQuestsQuestion, answerBestQuests
+Levelling.questsNearSubject, Levelling.answerQuestsNear = questsNearSubject, answerQuestsNear
+Levelling.sameAreaLine = sameAreaLine

@@ -183,15 +183,18 @@ local quests = {
     [101] = { "The Defias Brotherhood", 2, { { 13 } }, { { 13 } }, 18, 14 },
     [102] = { "Bounty on Murlocs", 0, { nil, { 500 } }, { { 5 } }, 12, 10 },
     [103] = { "Red Linen Goods", 1, { { 9 } }, { { 9 } }, 10, 8,
-        { { { 10 } }, nil, { { 2589 } } } },                                  -- kill thugs, collect linen
+        { { { 10 } }, nil, { { 2589 } } }, nil, nil, nil,                    -- kill thugs, collect linen
+        { "Kill 10 Defias Thugs and bring 6 Linen Cloth to Gryan." } },
     [104] = { "Scout Redridge", 1, { { 9 } }, { { 16 } }, 15, 12, {},
         { "Scout the Redridge camp", { [RR] = { { 50, 50 } } } } },          -- explore objective
     [105] = { "Patrolling Westfall", 1, { { 9 } }, { { 9 } }, 14, 10 },     -- available at Gryan
     [106] = { "Too Easy", 1, { { 9 } }, { { 9 } }, 3, 1 },                  -- grey for a level 20
     [107] = { "Too Hard", 1, { { 9 } }, { { 9 } }, 30, 28 },                -- level 28 needed
     [108] = { "Already Done", 1, { { 5 } }, { { 5 } }, 15, 10 },            -- Questie says not doable
-    [109] = { "Westfall Stew", 1, { { 9 } }, { { 9 } }, 15, 12 },
-    [110] = { "Goretusk Liver Pie", 1, { { 9 } }, { { 9 } }, 16, 12 },
+    [109] = { "Westfall Stew", 1, { { 9 } }, { { 9 } }, 15, 12,           -- loot linen from thugs
+        { nil, nil, { { 2589 } } }, nil, nil, nil, { "Bring 6 Linen Cloth to Gryan Stoutmantle." } },
+    [110] = { "Goretusk Liver Pie", 1, { { 9 } }, { { 9 } }, 16, 12,      -- kill thugs
+        { { { 10 } } }, nil, nil, nil, { "Kill 10 Defias Thugs, then return to Gryan." } },
     [111] = { "Redridge Goulash", 1, { { 16 } }, { { 16 } }, 18, 15 },
     [112] = { "Blackrock Menace", 1, { { 16 } }, { { 16 } }, 19, 16 },
     [113] = { "Shadowhide Gnolls", 1, { { 16 } }, { { 16 } }, 22, 18 },
@@ -333,6 +336,7 @@ QuestDB = {
     triggerEnd = function(id) return quests[id][8] end,
     extraObjectives = function(id) return quests[id][9] end,
     requiredSourceItems = function(id) return quests[id][10] end,
+    objectivesText = function(id) return quests[id][11] end,
     preQuestSingle = function(id) return chain[id] and chain[id].single end,
     preQuestGroup = function(id) return chain[id] and chain[id].group end,
     nextQuestInChain = function(id) return chain[id] and chain[id].nextQuest end,
@@ -366,7 +370,10 @@ LibQuestieDB = {
 Questie = { started = true }
 -- Questie's party sync: quest id -> { player name -> objectives }, and players who sent data
 local remoteLogs, remoteClasses = {}, {}
+-- Questie's quest XP (already scaled to your level)
+local questXp = { [100] = 2000, [103] = 900, [105] = 1050, [109] = 840, [110] = 1200 }
 QuestieLoader = { ImportModule = function() return {
+    GetQuestLogRewardXP = function(_, id) return questXp[id] or 0 end,
     GetQuest = function(_, id) return remoteLogs[id] end,
     remotePlayerClasses = remoteClasses,
     IsDoable = function(id) return doable[id] == true end,
@@ -686,6 +693,22 @@ do
     C_Map.GetBestMapForUnit = saved
 end
 ask("quests here", "Quests you can pick up", { "Thork", "Horde Errand" })
+
+-- Quest picks: XP per minute, and quests whose objectives share a spot
+ask("best quests", { "Best XP per minute near you (level 20):", "Patrolling Westfall", "1050 xp", "(talk)",
+    "Goretusk Liver Pie", "1200 xp", "(kill 10)", "Westfall Stew", "(loot 6)", "Red Linen Goods", "(loot 4)",
+    "in your log", "Rough estimates" })
+ask("which quests give the most xp", "Best XP per minute near you")
+-- A level-60 quest anyone can take (event / war effort) isn't a pick at level 20
+quests[105][5] = 60
+ask("best quests", "Goretusk Liver Pie", { "Patrolling Westfall" })
+quests[105][5] = 14
+ask("quests near red linen goods", { "Quests with objectives near |cffffd100Red Linen Goods|r:", "Goretusk Liver Pie",
+    "1200 xp", "from|r |cffffd100Gryan Stoutmantle", "Westfall Stew" }, { "Patrolling Westfall" })
+ask("what else can i do near goretusk liver pie", { "Westfall Stew", "Red Linen Goods", "in your log" })
+ask("who gives goretusk liver pie", { "Goretusk Liver Pie|r (level 16, needs 12, 1200 xp)", "Same area:", "Westfall Stew" })
+ask("quests near me", "Quests you can pick up")
+ask("quests near patrolling westfall", "has nothing to do out in the world")
 
 -- Next town: zones you're not in name their town's flight path, once a flight map has
 -- shown its name; "not learned" when AskBot knows your flight paths and it isn't one.

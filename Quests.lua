@@ -18,6 +18,14 @@ local dropRateNoteShown = false
 -- Answers
 --------------------------------------------------------------------------------------------
 
+--- XP quest `id` gives you (Questie's Forever XP table, scaled to your level), or nil.
+local function questXP(id)
+    local QuestXP = QuestieLoader and QuestieLoader:ImportModule("QuestXP")
+    if not (QuestXP and QuestXP.GetQuestLogRewardXP) then return nil end
+    local ok, xp = pcall(QuestXP.GetQuestLogRewardXP, QuestXP, id)
+    return ok and type(xp) == "number" and xp > 0 and xp or nil
+end
+
 local function friendlyPlaces(list)
     local mine = D.PlayerFaction()
     local out = {}
@@ -428,7 +436,9 @@ local function answerQuest(query, mode, questIds)
     for i = 1, math.min(3, #quests) do
         local id, name = quests[i][2], quests[i][3]
         local level, req = QuestDB.questLevel(id), QuestDB.requiredLevel(id)
-        local info = level and level > 0 and (" (level " .. level .. (req and req > 0 and (", needs " .. req) or "") .. ")") or ""
+        local xp = questXP(id)
+        local info = level and level > 0 and (" (level " .. level .. (req and req > 0 and (", needs " .. req) or "")
+            .. (xp and (", " .. xp .. " xp") or "") .. ")") or ""
         local who
         if finish then who = QuestDB.finishedBy(id) else who = QuestDB.startedBy(id) end
         who = who or {}
@@ -452,6 +462,10 @@ local function answerQuest(query, mode, questIds)
     for i, e in ipairs(quests) do ids[i] = e[2] end
     local group = groupLine(ids)
     if group then say(group) end
+    -- Other quests whose objectives are in the same spot (Levelling.lua, loaded later).
+    local sameArea = not finish and AskBot.Levelling and AskBot.Levelling.sameAreaLine
+    local line = sameArea and sameArea(quests[1][2])
+    if line then say(line) end
     didYouMean(others, finish and "who do i turn in %s to" or "who gives %s")
     pinBest(firstBest, finish and "turn in" or "quest")
 end
@@ -1522,7 +1536,8 @@ for _, s in ipairs({ "quest starters", "quest starter items", "quest starting it
     "starter items", "items that start a quest" }) do STARTER_QUESTIONS[s] = true end
 
 -- For the files loaded after this one.
-Quests.friendlyPlaces = friendlyPlaces
+Quests.friendlyPlaces, Quests.questXP, Quests.resolveQuest = friendlyPlaces, questXP, resolveQuest
+Quests.questObjectives = questObjectives
 Quests.answerTarget, Quests.placesForIds, Quests.questAvailable = answerTarget, placesForIds, questAvailable
 Quests.itemName, Quests.questComplete, Quests.questPlaces = itemName, questComplete, questPlaces
 Quests.turnInPlaces, Quests.bagCount, Quests.quicker = turnInPlaces, bagCount, quicker

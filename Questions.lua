@@ -340,6 +340,12 @@ local function answer(question)
     local gearSlots, gearWords = gearQuestion(q)
     if gearSlots then return answerUpgrades(gearSlots, gearWords) end
 
+    -- "best quests" (XP per minute), "quests near The Grizzled Den" (same spot). Looked up on
+    -- AskBot.Levelling here: answer() is at Lua's 60-upvalue limit.
+    if AskBot.Levelling.bestQuestsQuestion(q) then return AskBot.Levelling.answerBestQuests() end
+    local nearQuest = AskBot.Levelling.questsNearSubject(q)
+    if nearQuest then return AskBot.Levelling.answerQuestsNear(cleanSubject(nearQuest)) end
+
     for _, entry in ipairs(SPECIAL) do
         for _, pattern in ipairs(entry[2]) do
             local found, _, arg = q:find(pattern)
@@ -446,6 +452,7 @@ end
 function AskBot.IsPersonalQuestion(question)
     local q = normalize(question)
     if gearQuestion(q) or bagUpgradeQuestion(q) or trainingQuestion(q) then return true end
+    if AskBot.Levelling.bestQuestsQuestion(q) or AskBot.Levelling.questsNearSubject(q) then return true end
     if personalProfession(q) then return true end
     if HEARTH_QUESTIONS[q] then return true end
     if STARTER_QUESTIONS[q] then return true end
