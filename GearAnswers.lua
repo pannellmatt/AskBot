@@ -163,7 +163,7 @@ local function answerUpgrades(slots, words)
                 extra = extra .. " |cffff8040(" .. c.needs .. ")|r"
                 if c.needs:find("^train ") then
                     local isArmor = c.needs:find("Mail") or c.needs:find("Shield") or c.needs:find("Leather")
-                    local question = isArmor and "my class trainer" or "nearest weapon master"
+                    local question = isArmor and "my class trainer" or ("weapon master for " .. c.needs:sub(7))
                     extra = extra .. " " .. makeLink(isArmor and "trainer" or "weapon master", function() AskBot.Ask(question) end)
                 end
             end

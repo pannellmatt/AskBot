@@ -185,6 +185,8 @@ events:SetScript("OnEvent", function(_, event, ...)
         trainerTimer = C_Timer.NewTimer(0.3, function()
             local ok, err = pcall(AskBot.RecordTraining)
             if not ok and geterrorhandler then geterrorhandler()(err) end
+            ok, err = pcall(AskBot.WeaponMasters.Record)
+            if not ok and geterrorhandler then geterrorhandler()(err) end
         end)
     elseif event == "LEARNED_SPELL_IN_TAB" then
         pcall(AskBot.LearnedSpell, (...))

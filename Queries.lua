@@ -49,7 +49,7 @@ AskBot.targets = {
     { id = "cooking",        label = "Cooking trainer",        keys = { "cook" },                    test = trainerFor({ "cook" }) },
     { id = "firstaid",       label = "First Aid trainer",      keys = { "first aid", "firstaid", "bandage" }, test = trainerFor({ "first aid" }) },
     { id = "fishing",        label = "Fishing trainer",        keys = { "fish" },                    test = trainerFor({ "fish" }) },
-    { id = "weapon",         label = "Weapon Master",          keys = { "weapon" },                  test = trainerFor({ "weapon master" }) },
+    { id = "weapon",         label = "Weapon Master",          keys = { "weapon" },                  test = trainerFor({ "weapon master", "weapons trainer" }) },
     { id = "pet",            label = "Pet trainer",            keys = { "pet trainer", "pet skill" }, test = trainerFor({ "pet trainer" }) },
 
     -- Classes (keys are class names; "class trainer" is resolved to the player's class)

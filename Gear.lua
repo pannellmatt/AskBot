@@ -158,6 +158,7 @@ local WEAPONS = {
     DRUID = set({ 4, 5, 10, 13, 15 }),
 }
 local DUAL_WIELD = { WARRIOR = true, ROGUE = true, HUNTER = true }
+Gear.WEAPONS, Gear.WEAPON_NAMES = WEAPONS, WEAPON_NAMES
 
 -- Equip slot -> slot group.
 local GROUP_OF = {

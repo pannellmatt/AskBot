@@ -42,6 +42,7 @@ Profession and class trainers, weapon masters, pet trainers, flight masters, inn
 - `/ab where's my class trainer`
 - `/ab closest inn`
 - `/ab where is my nearest vendor` (or `merchant`)
+- `/ab what weapon master teaches bows` (or `where do I learn daggers`, `weapon master for 2h swords`): only the weapon masters who teach it. `/ab nearest weapon master` lists what each one teaches. AskBot starts from Classic's lists and remembers what a weapon master's training window shows.
 
 ### Quests
 Shift-click a quest into the command, or type its name.

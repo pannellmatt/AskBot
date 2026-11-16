@@ -141,6 +141,10 @@ local W, SW, DM, RR, OG = 40, 1519, 1, 44, 1637 -- area ids
 local TD, DS, BAR = 141, 148, 17
 local areaToMap = { [SW] = 1453, [W] = 1436, [DM] = 1426, [RR] = 1433, [OG] = 1454, [TD] = 1438, [DS] = 1439, [BAR] = 1413 }
 local npcs = {
+    [11867] = { "Woo Ping", "Weapon Master", 16, "A", { [SW] = { { 63.9, 69.1 } } } },
+    [11866] = { "Ilyenia Moonfire", "Weapon Master", 16, "A", { [DM] = { { 40, 40 } } } },
+    [2704] = { "Hanashi", "Weapon Master", 16, "H", { [OG] = { { 50, 50 } } } },
+    [260080] = { "Ember Bladewhisper", "Weapons Trainer", 16, "A", { [DM] = { { 45, 45 } } } },
     [1] = { "Helene Peltskinner", "Skinning Trainer", 16, "A", { [SW] = { { 71.6, 62.8 } } } },
     [2] = { "Far Skinner", "Skinning Trainer", 16, "A", { [DM] = { { 50, 50 } } } },
     [3] = { "Horde Skinner", "Skinning Trainer", 16, "H", { [W] = { { 55, 50 } } } },
@@ -932,6 +936,14 @@ ask("what gear should i get", { "Upgrades for Arms Warrior", "Guessing Arms (no 
 talents = { 11, 0, 0 }
 ask("debug item 9001", { "slot legs", "needs level 18", "ITEM_MOD_STRENGTH_SHORT=5", "score for Arms: 8.6" })
 ask("nearest weapon master", "Weapon Master", { "Upgrades for" })
+ask("nearest weapon master", { "Woo Ping", "(Crossbows, Daggers, Polearms, Staves, Swords, 2H Swords)" }, { "Hanashi" })
+ask("what weapon master teaches bow", { "Nearest Weapon Master for Bows:", "Ilyenia Moonfire" }, { "Woo Ping", "Hanashi", "Crossbows" })
+ask("where can i learn two handed swords", { "Weapon Master for Two-Handed Swords:", "Woo Ping" }, { "Ilyenia" })
+ask("who teaches swords", { "Weapon Master for Swords", "(you already know it)", "Woo Ping" })
+ask("where do i train wands", "No one teaches Wands")
+ask("weapon master for guns", { "I don't know a Weapon Master friendly to you who teaches Guns",
+    "Not known yet: Ember Bladewhisper" })
+ask("when do i learn hammer of wrath", nil, { "Weapon Master" })
 
 -- One item against what you wear
 local function link(id) return "|cff1eff00|Hitem:" .. id .. "::|h[" .. gear[id][1] .. "]|h|r" end
@@ -1000,6 +1012,13 @@ fire("TRAINER_SHOW")
 advance(1)
 ask("what skills can i learn", { "Ready to train (2): |cffffd100Hamstring|r, |cffffd100Heroic Strike|r", " - 1s 60c",
     "Next at level 24:|r |cffffd100Heroic Strike" }, { "Rend", "unavailable", "56" })
+-- A weapon master's window (Forever rows: name, type) is remembered account-wide.
+UnitGUID = function(u) if u == "npc" then return "Creature-0-1-1-1-260080-0000" end return realGuid(u) end
+trainerList = { { "Guns", "available", nil, nil, 1, 1000 }, { "One-Handed Maces", "unavailable", nil, nil, 1, 1000 } }
+fire("TRAINER_SHOW")
+advance(1)
+ask("weapon master for guns", { "Weapon Master for Guns:", "Ember Bladewhisper" }, { "Not known yet" })
+ask("nearest weapon master", "Guns, Maces")
 UnitGUID = realGuid
 GetNumTrainerServices = nil
 

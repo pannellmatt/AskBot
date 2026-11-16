@@ -293,6 +293,10 @@ local function answer(question)
             .. GREY .. ". Click one to pin it; /ab clear removes them.|r")
     end
 
+    -- "what weapon master teaches bows", "where do I learn daggers"
+    local wmKind, wmSkill = AskBot.WeaponMasters.Question(q)
+    if wmKind and not itemId then return AskBot.WeaponMasters.Answer(wmKind, wmSkill) end
+
     -- "what skills can I learn": class spells (unless it names a profession or service).
     if trainingQuestion(q) then
         local t = findTarget(q)
