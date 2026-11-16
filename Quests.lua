@@ -852,7 +852,10 @@ local function questLabel(id, name)
         local c = GetQuestDifficultyColor(level)
         if c and c.r then color = string.format("|cff%02x%02x%02x", c.r * 255, c.g * 255, c.b * 255) end
     end
-    return color .. (level and level > 0 and ("[" .. level .. "] ") or "") .. (name or QuestDB.name(id) or ("quest " .. id)) .. "|r"
+    local text = (level and level > 0 and ("[" .. level .. "] ") or "") .. (name or QuestDB.name(id) or ("quest " .. id))
+    -- Clickable (asks about the quest), except in answers for someone else's chat.
+    if AskBot.asker then return color .. text .. "|r" end
+    return makeLink(text, function() AskBot.Ask("|Hquest:" .. id .. "|h") end, color)
 end
 
 --- Quest givers on your continent with quests you can take, nearest first:

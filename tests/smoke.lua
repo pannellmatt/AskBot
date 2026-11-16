@@ -3,6 +3,14 @@
 local dir = arg[1] or "."
 
 local output = {}
+-- Quest names are coloured AskBot links; tests match them as plain coloured text too.
+local function withPlainQuestLinks(text)
+    local plain = text:gsub("(|c%x%x%x%x%x%x%x%x)|Haddon:askbot:%d+|h(.-)|h|r", function(color, t)
+        if color:lower() == "|cff71d5ff" then return nil end
+        return color .. t .. "|r"
+    end)
+    return text .. "\n" .. plain
+end
 DEFAULT_CHAT_FRAME = { AddMessage = function(_, m)
     output[#output + 1] = m
     print((m:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|Haddon:askbot:(%d+)|h", "<%1>"):gsub("|h", "")))
@@ -199,6 +207,8 @@ local quests = {
         { nil, nil, { { 2589 } } }, nil, nil, nil, { "Bring 6 Linen Cloth to Gryan Stoutmantle." } },
     [110] = { "Goretusk Liver Pie", 1, { { 9 } }, { { 9 } }, 16, 12,      -- kill thugs
         { { { 10 } } }, nil, nil, nil, { "Kill 10 Defias Thugs, then return to Gryan." } },
+    [160] = { "Thug Cull", 1, { { 9 } }, { { 9 } }, 23, 21,               -- kill thugs, opens at 21
+        { { { 10 } } }, nil, nil, nil, { "Kill 15 Defias Thugs." } },
     [111] = { "Redridge Goulash", 1, { { 16 } }, { { 16 } }, 18, 15 },
     [112] = { "Blackrock Menace", 1, { { 16 } }, { { 16 } }, 19, 16 },
     [113] = { "Shadowhide Gnolls", 1, { { 16 } }, { { 16 } }, 22, 18 },
@@ -381,7 +391,8 @@ Questie = { started = true }
 -- Questie's party sync: quest id -> { player name -> objectives }, and players who sent data
 local remoteLogs, remoteClasses = {}, {}
 -- Questie's quest XP (already scaled to your level)
-local questXp = { [100] = 2000, [103] = 900, [105] = 1050, [109] = 840, [110] = 1200 }
+local questXp = { [100] = 2000, [103] = 900, [105] = 1050, [109] = 840, [110] = 1200, [104] = 1100, [111] = 1400,
+    [112] = 1500, [113] = 1700, [120] = 1400, [121] = 1500, [122] = 1600 }
 QuestieLoader = { ImportModule = function() return {
     GetQuestLogRewardXP = function(_, id) return questXp[id] or 0 end,
     GetQuest = function(_, id) return remoteLogs[id] end,
@@ -544,7 +555,7 @@ local function ask(q, expect, reject)
     local from = #output + 1
     print("\n> /askbot " .. q)
     SlashCmdList.ASKBOT(q)
-    local text = table.concat(output, "\n", from)
+    local text = withPlainQuestLinks(table.concat(output, "\n", from))
     for _, e in ipairs(type(expect) == "table" and expect or { expect }) do
         if not text:find(e, 1, true) then failures = failures + 1; print("   !! FAIL: expected " .. e) end
     end
@@ -591,7 +602,7 @@ do
     fire("AUCTION_HOUSE_SHOW")
     advance(2)  -- AskBot starts the search
     advance(4)  -- results settle
-    local text = table.concat(output, "\n", from)
+    local text = withPlainQuestLinks(table.concat(output, "\n", from))
     for _, e in ipairs({ "refreshing 2 prices", "Price changes:", "12s 50c > ", "10s 80c", "1 not listed right now" }) do
         if not text:find(e, 1, true) then failures = failures + 1; print("   !! FAIL: expected " .. e) end
     end
@@ -671,40 +682,61 @@ SlashCmdList.ASKBOT("status", { chatFrame = DEFAULT_CHAT_FRAME }) -- switch back
 ask("my quests", { "Ready to hand in:", "The Defias Brotherhood", "Gryan Stoutmantle", "Nearest objectives:",
     "Linen Cloth|r from: ", "Scout the Redridge camp" }, { "Kill: " })
 ask("what should i do next", { "What to do next (level 20):", "Hand in: ", "Objective: ", "New quests: ",
-    "Dungeon: ", "[my quests]" }, { "Best zone" })
+    "Dungeon: ", "[my quests]", "Best zone: |cffffd100Redridge Mountains|r (1 yours + 3 new)" })
 ask("quests here", { "Quests you can pick up (10 on this continent)", "Gryan Stoutmantle", "Patrolling Westfall",
     "Wanted Poster", "Bounty on Murlocs" }, { "Too Easy", "Too Hard", "Already Done", "Defias Brotherhood" })
 ask("what quests can i get", "Patrolling Westfall")
--- Zones at level 20, standing in Westfall with two Westfall quests in the log:
--- Westfall first (your quests are there), then Redridge (new quests 18-22, plus one of yours),
--- then Darkshore (as good, but across the sea). Horde givers' quests and capitals never appear.
+-- Kill-only quests: Goretusk Liver Pie (kill thugs) yes; Westfall Stew (loot linen), Red Linen
+-- Goods (kill + linen) and Bounty on Murlocs (no objectives) only with loot / not at all.
+ask("what are all the kill only quests in the area that i can get", { "Kill-only quests to pick up in Westfall",
+    "Goretusk Liver Pie", "Coming up:|r |cffffd100[23] Thug Cull|r|cffaaaaaa (at 21)",
+    "Also 1 with mob drops to collect:" }, { "Westfall Stew", "Patrolling Westfall", "Bounty on Murlocs", "Wanted Poster" })
+ask("kill and loot quests", { "Kill and loot quests to pick up in Westfall", "Goretusk Liver Pie", "Westfall Stew" },
+    { "Patrolling Westfall", "Bounty on Murlocs" })
+-- Quest names are links: clicking one asks about that quest.
+do
+    local questLink
+    for _, m in ipairs(output) do questLink = m:match("|H(addon:askbot:%d+)|h%[16%] Goretusk Liver Pie|h") or questLink end
+    print("\n> click " .. tostring(questLink))
+    local from = #output + 1
+    linkCallback(nil, questLink)
+    local text = table.concat(output, "\n", from)
+    if not text:find("Gryan Stoutmantle", 1, true) then failures = failures + 1; print("   !! FAIL: quest link click") end
+end
+-- Zones at level 20, standing in Westfall with two Westfall quests in the log: Redridge first
+-- (the most XP: new quests 18-22 plus one of yours, 6 min away), then Darkshore (more XP than
+-- Westfall; 20 min of travel would halve it, 6 min doesn't), then Westfall (only your two). Quests more than 2 levels from yours, Horde givers' quests and
+-- capitals never count.
 do
     local from = #output + 1
     ask("where should i level", { "Where to quest at level 20:",
-        "1. |cffffd100Westfall|r: 2 yours + 4 new", "Gryan Stoutmantle, 68 yds",
-        "2. |cffffd100Redridge Mountains|r: 1 yours + 3 new, lvl 15-22", "Scout the Redridge camp",
-        "3. |cffffd100Darkshore|r: 3 new, lvl 19-21", "~6 min by boat" },
+        "3. |cffffd100Westfall|r: 2 yours, lvl 10-18, 2900 xp", "Gryan Stoutmantle, 68 yds",
+        "1. |cffffd100Redridge Mountains|r: 1 yours + 3 new, lvl 15-22, 5700 xp", "Scout the Redridge camp",
+        "2. |cffffd100Darkshore|r: 3 new, lvl 19-21, 4500 xp", "~6 min by boat" },
         { "The Barrens", "Stormwind City|r:", "Horde Errand" })
-    local text = table.concat(output, "\n", from)
+    local text = withPlainQuestLinks(table.concat(output, "\n", from))
     local function pos(s) return text:find(s, 1, true) or math.huge end
-    if not (pos("Westfall|r:") < pos("Redridge Mountains|r:") and pos("Redridge Mountains|r:") < pos("Darkshore|r:")) then
-        failures = failures + 1; print("   !! FAIL: expected Westfall, then Redridge, then Darkshore")
+    if not (pos("Redridge Mountains|r:") < pos("Darkshore|r:") and pos("Darkshore|r:") < pos("Westfall|r:")) then
+        failures = failures + 1; print("   !! FAIL: expected Redridge, then Darkshore, then Westfall")
     end
 end
 -- Debug: explains the zone you're in (Westfall) and the ranking
 C_Map.GetBestMapForUnit = function(unit) return ({ player = 1436, party1 = 1433 })[unit] end
-ask("zones debug", { "|cffffd100Westfall|r|cffaaaaaa: 14", "counted", "in your log", "too easy (grey)",
+ask("zones debug", { "|cffffd100Westfall|r|cffaaaaaa: 15", "counted", "in your log", "too easy (grey)",
     "How these were ranked", "of yours", "away, score" }, { "The Barrens" })
--- "What now" from another zone (the map says Redridge) suggests the best zone, Westfall
+-- "What now" while the map says you're in the best zone (Redridge): no "Best zone" line
 do
     local saved = C_Map.GetBestMapForUnit
     C_Map.GetBestMapForUnit = function(unit) return ({ player = 1433 })[unit] end
-    ask("what now", { "Best zone: |cffffd100Westfall|r (2 yours + 4 new) - Gryan Stoutmantle, 68 yds" })
+    ask("what now", "What to do next", { "Best zone" })
     C_Map.GetBestMapForUnit = saved
 end
 ask("quests here", "Quests you can pick up", { "Thork", "Horde Errand" })
 
 -- Quest picks: XP per minute, and quests whose objectives share a spot
+-- (Best quests was written before the Redridge and Darkshore quests had XP.)
+local zoneXp = {}
+for _, id in ipairs({ 111, 112, 113, 120, 121, 122 }) do zoneXp[id], questXp[id] = questXp[id], nil end
 ask("best quests", { "Best XP per minute near you (level 20):", "Patrolling Westfall", "1050 xp", "(talk)",
     "Goretusk Liver Pie", "1200 xp", "(kill 10)", "Westfall Stew", "(loot 6)", "Red Linen Goods", "(loot 4)",
     "in your log", "Rough estimates" })
@@ -712,6 +744,7 @@ ask("which quests give the most xp", "Best XP per minute near you")
 -- A level-60 quest anyone can take (event / war effort) isn't a pick at level 20
 quests[105][5] = 60
 ask("best quests", "Goretusk Liver Pie", { "Patrolling Westfall" })
+for id, xp in pairs(zoneXp) do questXp[id] = xp end
 quests[105][5] = 14
 ask("quests near red linen goods", { "Quests with objectives near |cffffd100Red Linen Goods|r:", "Goretusk Liver Pie",
     "1200 xp", "from|r |cffffd100Gryan Stoutmantle", "Westfall Stew" }, { "Patrolling Westfall" })
@@ -742,7 +775,7 @@ do
     local savedKnown = AskBotCharDB.knownTaxi
     AskBotCharDB.knownTaxi = { [4] = true, [14] = true } -- Westfall and Stormwind, not Lakeshire
     ask("where should i go at 18", { "Where to quest at level 18:",
-        "Redridge Mountains|r: 1 yours + 3 new", ", FP |cffffd100Lakeshire|r|cffaaaaaa (not learned)" },
+        "Redridge Mountains|r: 1 yours + 2 new", ", FP |cffffd100Lakeshire|r|cffaaaaaa (not learned)" },
         { "Westfall|r, " })
     AskBotCharDB.knownTaxi = savedKnown
 end
@@ -772,8 +805,16 @@ do
     C_QuestLog.GetInfo, C_QuestLog.GetNumQuestLogEntries, C_QuestLog.GetQuestTagInfo = savedInfo, savedNum, nil
 end
 ask("tidy quest log", { "Quest log: 3 of 20. Could drop:", "Grey (little XP): " }, { "Need a group", "Far away" })
-ask("zones for level 14", { "Where to quest at level 14:", "Westfall|r: 2 yours + 4 new" },
+ask("zones for level 14", { "Where to quest at level 14:", "Westfall|r: 2 yours + 3 new, lvl 10-18, 5990 xp" },
     { "Too Easy" })
+ask("which region should i level in now", { "Where to quest at level 20:", "Redridge Mountains|r: 1 yours + 3 new" })
+ask("best place to level", "Where to quest at level 20:")
+-- Travel to a zone: its flight master, else inn, else a quest giver there
+ask("quickest route to redridge", { "Quickest way to |cffffd100Redridge Mountains|r, ",
+    "fly Westfall > Redridge Mountains - |cffffd100Ariena Stormfeather" }, { "Where to quest" })
+ask("how do i get to darkshore", { "Quickest way to |cffffd100Darkshore|r", "boat" })
+ask("route to hand in", "Hand-in route", { "Quickest way" })
+ask("how do i get to the defias brotherhood", "Defias Brotherhood", { "Quickest way" })
 ask("where should i quest next?", { "Where to quest at level 20:", "Redridge Mountains", "Quests you can pick up",
     "Wanted Poster" })
 ask("dungeons", { "Dungeons for level 20:", "The Deadmines|r (10-26)", "[loot]", "entrance Westfall 42.6, 71.8" },
@@ -902,7 +943,7 @@ gear[9001][8] = true
 do
     local from = #output + 1
     fire("GET_ITEM_INFO_RECEIVED", 9001, true)
-    local text = table.concat(output, "\n", from)
+    local text = withPlainQuestLinks(table.concat(output, "\n", from))
     for _, e in ipairs({ "Upgrades for Arms Warrior, level 20:", "Legs: ", "Militia Leggings", "+514%",
         "quest |cffffd100Blackrock Menace|r, from Martie Jainrose (Redridge Mountains",
         "Two-hander: ", "Rockslicer", "(train Two-Handed Axes)", "[weapon master]",
@@ -1144,7 +1185,7 @@ do
     local from = #output + 1
     fire("ZONE_CHANGED_NEW_AREA")
     advance(3)
-    local text = table.concat(output, "\n", from)
+    local text = withPlainQuestLinks(table.concat(output, "\n", from))
     for _, e in ipairs({ "Rare here: |cffffd100Foreman Grills|r (21 elite) can drop", "[Grills' Girdle]",
         "for your empty waist slot", "[pin]" }) do
         if not text:find(e, 1, true) and not text:find(e:gsub("%[pin%]", "|Haddon:askbot:"), 1, true) then

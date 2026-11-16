@@ -135,7 +135,10 @@ local SPECIAL = {
         "^where next at (%d+)$", "^next zone at (%d+)$", "^zones? debug$", "^zones? for level (%d+)$", "^level (%d+) zones?$", "^where should i level at (%d+)$", "^where to level at (%d+)$",
         "^where should i level", "^where to level", "^where do i level", "^where can i level", "^where should i go$",
         "^zones?$", "^zones? for me$", "^zones? for my level$", "^what zones?", "^which zones?", "^best zones?",
-        "^levell?ing zones?", "^where to go$" } },
+        "^levell?ing zones?", "^where to go$", "^which regions?", "^what regions?", "^best regions?",
+        "^levell?ing regions?", "^which areas? should", "^what areas? should", "^which areas? to level",
+        "^best places? to level", "^where is the best place to level", "^where is best to level",
+        "^best areas? to level", "^best zones? to level" } },
     { "next", {
         "^what is next$", "^whats next$", "^what next$", "^next$", "^what now$", "^what should i do",
         "^what do i do", "^what can i do", "^what to do", "^what shall i do", "^im bored", "^next steps?$" } },
@@ -297,6 +300,10 @@ local function answer(question)
     local wmKind, wmSkill = AskBot.WeaponMasters.Question(q)
     if wmKind and not itemId then return AskBot.WeaponMasters.Answer(wmKind, wmSkill) end
 
+    -- "kill only quests here", "kill and loot quests"
+    local killMode = AskBot.Levelling.killQuestsQuestion(q)
+    if killMode then return AskBot.Levelling.answerKillQuests(killMode) end
+
     -- "what skills can I learn": class spells (unless it names a profession or service).
     if trainingQuestion(q) then
         local t = findTarget(q)
@@ -349,6 +356,8 @@ local function answer(question)
     if AskBot.Levelling.bestQuestsQuestion(q) then return AskBot.Levelling.answerBestQuests() end
     local nearQuest = AskBot.Levelling.questsNearSubject(q)
     if nearQuest then return AskBot.Levelling.answerQuestsNear(cleanSubject(nearQuest)) end
+    local routeZone = AskBot.Levelling.routeSubject(q)
+    if routeZone then return AskBot.Levelling.answerRouteTo(routeZone) end
     local toZone = AskBot.Levelling.questsToSubject(q)
     if toZone then return AskBot.Levelling.answerQuestsTo(toZone) end
 
@@ -458,7 +467,7 @@ end
 function AskBot.IsPersonalQuestion(question)
     local q = normalize(question)
     if gearQuestion(q) or bagUpgradeQuestion(q) or trainingQuestion(q) then return true end
-    if AskBot.Levelling.bestQuestsQuestion(q) or AskBot.Levelling.questsNearSubject(q)
+    if AskBot.Levelling.bestQuestsQuestion(q) or AskBot.Levelling.killQuestsQuestion(q) or AskBot.Levelling.questsNearSubject(q)
         or AskBot.Levelling.questsToSubject(q) then return true end
     if personalProfession(q) then return true end
     if HEARTH_QUESTIONS[q] then return true end

@@ -137,9 +137,11 @@ end
 -- Clickable chat links: each stores a function to run when clicked.
 local links, linkCount = {}, 0
 
-local function makeLink(text, run)
+--- A clickable "[text]" in link blue; with `color`, the text in that colour and no brackets.
+local function makeLink(text, run, color)
     linkCount = linkCount + 1
     links[linkCount] = run
+    if color then return color .. "|Haddon:askbot:" .. linkCount .. "|h" .. text .. "|h|r" end
     return "|cff71d5ff|Haddon:askbot:" .. linkCount .. "|h[" .. text .. "]|h|r"
 end
 
