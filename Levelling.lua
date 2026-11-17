@@ -1177,6 +1177,231 @@ local function answerKillQuests(mode)
     if list[1] then autoPin(list[1].r.place, list[1].r.spawn, "quests") end
 end
 
+--------------------------------------------------------------------------------------------
+-- Quests you can finish with auction house items: "cost to complete [quest]", "reagent quests"
+--------------------------------------------------------------------------------------------
+
+--- The game's class ID, type name and bind type for an item (nil until the client caches it).
+local function gameItemInfo(itemId)
+    local getInfo = (C_Item and C_Item.GetItemInfo) or GetItemInfo
+    if not getInfo then return nil end
+    local r = { getInfo(itemId) }
+    if not r[1] and C_Item and C_Item.RequestLoadItemDataByID then C_Item.RequestLoadItemDataByID(itemId) end
+    return r[12], r[6], r[14]
+end
+
+--- Can it be bought on the AH? Not quest items (class 12) or bind-on-pickup/quest-bound ones.
+local function auctionable(itemId)
+    local cls = ItemDB.class and ItemDB.class(itemId)
+    local gameCls, _, bind = gameItemInfo(itemId)
+    return (cls or gameCls) ~= 12 and bind ~= 1 and bind ~= 4
+end
+
+--- A crafting reagent: Trade Goods (class 7).
+local function tradeGood(itemId)
+    local cls = ItemDB.class and ItemDB.class(itemId)
+    if cls then return cls == 7 end
+    local gameCls, typeName = gameItemInfo(itemId)
+    return gameCls == 7 or typeName == "Trade Goods"
+end
+
+--- A quest whose only objectives are trade goods that mobs drop and the AH can sell.
+local function reagentQuest(id)
+    local o = QuestDB.objectives(id) or {}
+    if not (o[3] and #o[3] > 0) then return false end
+    for _, i in ipairs({ 1, 2, 4, 5, 6 }) do
+        if type(o[i]) == "table" and #o[i] > 0 then return false end
+    end
+    if QuestDB.triggerEnd and QuestDB.triggerEnd(id) then return false end
+    local items = {}
+    for _, c in ipairs(o[3]) do
+        local drops = ItemDB.npcDrops(c[1])
+        if not (drops and #drops > 0 and tradeGood(c[1]) and auctionable(c[1])) then return false end
+        items[c[1]] = true
+    end
+    for _, itemId in ipairs((QuestDB.requiredSourceItems and QuestDB.requiredSourceItems(id)) or {}) do
+        if not items[itemId] then return false end
+    end
+    return true
+end
+
+--- Cheapest known price for one: the AH, or a vendor when Questie lists one and it's cheaper.
+local function unitPrice(itemId)
+    local P = AskBot.Prices
+    if not P.Available() then return nil end
+    local ah = P.Auction(itemId)
+    local sold = ItemDB.vendors(itemId)
+    local vendor = sold and #sold > 0 and P.VendorBuy(itemId)
+    if vendor and (not ah or vendor <= ah) then return vendor, "vendor" end
+    return ah
+end
+
+--- The items a quest asks for: { id, name, count, have, need, price, from, buyable }, and the
+--- total cost of what's missing (nil if a missing item has no price).
+local function questShopping(id)
+    local o = QuestDB.objectives(id) or {}
+    local logObjectives = C_QuestLog and C_QuestLog.GetQuestObjectives and C_QuestLog.GetQuestObjectives(id)
+    local list, total = {}, 0
+    for _, c in ipairs(o[3] or {}) do
+        local itemId = c[1]
+        local name = ItemDB.name(itemId) or ("item " .. itemId)
+        local count = objectiveCount(id, name)
+        for _, lo in ipairs(logObjectives or {}) do
+            if lo.text and lo.numRequired and lo.text:lower():find(name:lower(), 1, true) then count = lo.numRequired; break end
+        end
+        local have = AskBot.Quests.bagCount(itemId, true)
+        local e = { id = itemId, name = name, count = count, have = have, need = math.max(0, count - have),
+            buyable = auctionable(itemId) }
+        if e.buyable then e.price, e.from = unitPrice(itemId) end
+        if e.need > 0 then
+            if e.price and total then total = total + e.price * e.need else total = nil end
+        end
+        list[#list + 1] = e
+    end
+    return list, total
+end
+
+--- "6 Linen Cloth" for what's still needed.
+local function shoppingText(list)
+    local parts = {}
+    for _, e in ipairs(list) do
+        if e.need > 0 then parts[#parts + 1] = e.need .. " " .. e.name end
+    end
+    return #parts > 0 and table.concat(parts, ", ") or "you have them all"
+end
+
+--- Where to go: the giver (if it's not in your log yet) and the turn-in.
+local function shoppingPlaces(id, inLog)
+    local giver
+    if not inLog then
+        local info = D.questInfo[id]
+        giver = info and D.Rank(placesForIds(info.npcs, info.objects, true))[1]
+    end
+    local turnIn = D.Rank(turnInPlaces(id))[1]
+    if giver and turnIn and giver.place.name == turnIn.place.name then giver = nil end
+    return giver, turnIn
+end
+
+local function placeText(r, label)
+    return GOLD .. r.place.name .. "|r, " .. shortHow(r) .. " " .. pinLink(r.place, r.spawn, label)
+end
+
+--- "cost to complete [quest]": what's left to buy, at what price, and where to hand it in.
+local function answerQuestCost(query, questId)
+    local P = AskBot.Prices
+    local id, inLog = resolveQuest(query, questId)
+    if not id then return say("I couldn't find a quest called \"" .. tostring(query) .. "\".") end
+    local o = QuestDB.objectives(id) or {}
+    if not (o[3] and #o[3] > 0) then
+        return say(questLabel(id) .. " doesn't ask for items, so there's nothing to buy.")
+    end
+    if questStatus(id, inLog) == "done" then return say("You've already done " .. questLabel(id) .. ".") end
+    local list, total = questShopping(id)
+    local xp = questXP(id)
+    local head = questLabel(id) .. (xp and (GREY .. " (" .. xp .. "xp)|r") or "")
+    local missing, lines = 0, {}
+    for _, e in ipairs(list) do
+        local have = e.have > 0 and (GREY .. " (have " .. e.have .. ")|r") or ""
+        local text
+        if e.need == 0 then
+            text = e.name .. ": got all " .. e.count
+        elseif not e.buyable then
+            text = e.need .. " " .. e.name .. have .. ": can't be bought, it's a quest item"
+        elseif e.price then
+            text = e.need .. " " .. e.name .. have .. " x " .. P.Format(e.price)
+                .. (e.from == "vendor" and (GREY .. " (vendor)|r") or "") .. " = " .. P.Format(e.price * e.need)
+        else
+            text = e.need .. " " .. e.name .. have .. ": " .. (P.Available() and "no AH price yet" or "no price (install Auctionator)")
+        end
+        if e.need > 0 then missing = missing + 1 end
+        lines[#lines + 1] = text
+    end
+    local extra = ""
+    for _, i in ipairs({ 1, 2, 4, 5, 6 }) do
+        if type(o[i]) == "table" and #o[i] > 0 then extra = GREY .. " (plus objectives you can't buy)|r"; break end
+    end
+    if missing == 0 then
+        say(head .. ": you have everything" .. extra .. ".")
+    elseif #lines == 1 then
+        say(head .. ": " .. lines[1] .. extra)
+    else
+        say(head .. (total and (": ~" .. P.Format(total) .. " to buy") or "") .. extra)
+        for _, l in ipairs(lines) do say("  " .. l) end
+    end
+    local giver, turnIn = shoppingPlaces(id, inLog[id])
+    if giver then say("  Get it from " .. placeText(giver, QuestDB.name(id))) end
+    if turnIn then say("  Hand in: " .. placeText(turnIn, QuestDB.name(id))) end
+    local first = giver or turnIn
+    if first then autoPin(first.place, first.spawn, QuestDB.name(id)) end
+end
+
+--- "cost to complete X", "how much would it cost to finish X" -> "X".
+local COST_VERBS = { complete = true, finish = true, ["do"] = true, buy = true }
+local function costSubject(q)
+    local verb, s = q:match("cost to (%a+) (.+)$")
+    if not verb then verb, s = q:match("^how much to (%a+) (.+)$") end
+    if not verb then verb, s = q:match("^price to (%a+) (.+)$") end
+    if verb and COST_VERBS[verb] then return (s:gsub("^quest ", "")) end
+end
+
+--- Words beside a quest link that ask what it costs: "cost to complete", "how much to buy".
+local function costWords(q)
+    for w in q:gmatch("%a+") do
+        if w == "cost" or w == "costs" or w == "price" then return true end
+    end
+    return q:find("how much to", 1, true) ~= nil
+end
+
+--- "what reagent quests are in my level range", "ah quests", "quests i can buy".
+local function reagentQuestsQuestion(q)
+    local w = {}
+    for x in q:gmatch("%a+") do w[x] = true end
+    if not (w.quest or w.quests) then return false end
+    return (w.reagent or w.reagents or w.ah or w.auction or w.buyable or (w.buy and w.quests)) and true or false
+end
+
+--- Quests you can take (or have) that only want reagents from the AH, best XP per gold first.
+local function answerReagentQuests()
+    local P = AskBot.Prices
+    local maxLevel = askerLevel() + 5 -- not the level-60 war-effort quests anyone can take
+    local rows, seen = {}, {}
+    local function add(id, inLog)
+        if seen[id] or (QuestDB.questLevel(id) or 0) > maxLevel or not reagentQuest(id) then return end
+        seen[id] = true
+        local list, total = questShopping(id)
+        local xp = questXP(id) or 0
+        rows[#rows + 1] = { id = id, inLog = inLog, list = list, total = total, xp = xp,
+            value = total and xp / math.max(total, 1) or -1 }
+    end
+    for _, q in ipairs(questLogEntries()) do
+        if not questComplete(q.id) then add(q.id, true) end
+    end
+    for _, id in ipairs(doableQuests()) do add(id, false) end
+    if #rows == 0 then
+        return say("No quests near your level that only want reagents from the auction house, as far as Questie knows.")
+    end
+    table.sort(rows, function(a, b)
+        if a.value ~= b.value then return a.value > b.value end
+        return a.xp > b.xp
+    end)
+    say("Quests you can finish with AH reagents (" .. #rows .. "), best xp per gold first:")
+    local first
+    for i = 1, math.min(6, #rows) do
+        local r = rows[i]
+        local cost = r.total and (r.total > 0 and (" ~" .. P.Format(r.total)) or "")
+            or (GREY .. " (no price)|r")
+        local giver, turnIn = shoppingPlaces(r.id, r.inLog)
+        local where = ""
+        if turnIn then where = " - hand in " .. placeText(turnIn, QuestDB.name(r.id)) end
+        if giver then where = where .. GREY .. " (from " .. giver.place.name .. ")|r" end
+        say("  " .. questLabel(r.id) .. (r.xp > 0 and (GREY .. " " .. r.xp .. "xp|r") or "")
+            .. (r.inLog and (GREY .. " [in log]|r") or "") .. ": " .. shoppingText(r.list) .. cost .. where)
+        first = first or giver or turnIn
+    end
+    if not P.Available() then say(GREY .. "  Install Auctionator for prices.|r") end
+    if first then autoPin(first.place, first.spawn, "quest") end
+end
+
 --- "best quests": quests near you and in your log, by XP per minute of rough effort.
 local function bestQuestsQuestion(q)
     if q:find("how much", 1, true) then return false end
@@ -1570,6 +1795,8 @@ Levelling.HEARTH_QUESTIONS, Levelling.answerHearth = HEARTH_QUESTIONS, answerHea
 Levelling.trainingQuestion, Levelling.answerTraining = trainingQuestion, answerTraining
 Levelling.bestQuestsQuestion, Levelling.answerBestQuests = bestQuestsQuestion, answerBestQuests
 Levelling.killQuestsQuestion, Levelling.answerKillQuests = killQuestsQuestion, answerKillQuests
+Levelling.costSubject, Levelling.costWords, Levelling.answerQuestCost = costSubject, costWords, answerQuestCost
+Levelling.reagentQuestsQuestion, Levelling.answerReagentQuests = reagentQuestsQuestion, answerReagentQuests
 Levelling.routeSubject, Levelling.answerRouteTo = routeSubject, answerRouteTo
 Levelling.questsNearSubject, Levelling.answerQuestsNear = questsNearSubject, answerQuestsNear
 Levelling.sameAreaLine = sameAreaLine

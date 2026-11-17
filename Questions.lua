@@ -264,6 +264,14 @@ local function answer(question)
         if intent then break end
     end
 
+    -- "cost to complete [quest]", "what reagent quests are in my level range"
+    if questId and AskBot.Levelling.costWords(wordsOutsideLinks(question)) then
+        return AskBot.Levelling.answerQuestCost(nil, tonumber(questId))
+    end
+    local costOf = not questId and AskBot.Levelling.costSubject(q)
+    if costOf then return AskBot.Levelling.answerQuestCost(costOf) end
+    if not questId and AskBot.Levelling.reagentQuestsQuestion(q) then return AskBot.Levelling.answerReagentQuests() end
+
     if questId then
         if intent == "whoHas" then return answerWhoHas(nil, tonumber(questId)) end
         if intent == "chain" then return answerChain(nil, tonumber(questId)) end
@@ -468,7 +476,9 @@ function AskBot.IsPersonalQuestion(question)
     local q = normalize(question)
     if gearQuestion(q) or bagUpgradeQuestion(q) or trainingQuestion(q) then return true end
     if AskBot.Levelling.bestQuestsQuestion(q) or AskBot.Levelling.killQuestsQuestion(q) or AskBot.Levelling.questsNearSubject(q)
-        or AskBot.Levelling.questsToSubject(q) then return true end
+        or AskBot.Levelling.questsToSubject(q) or AskBot.Levelling.reagentQuestsQuestion(q)
+        or AskBot.Levelling.costSubject(q) then return true end
+    if question:find("|Hquest") and AskBot.Levelling.costWords(wordsOutsideLinks(question)) then return true end
     if personalProfession(q) then return true end
     if HEARTH_QUESTIONS[q] then return true end
     if STARTER_QUESTIONS[q] then return true end

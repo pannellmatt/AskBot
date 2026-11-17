@@ -693,6 +693,19 @@ ask("what are all the kill only quests in the area that i can get", { "Kill-only
     "Also 1 with mob drops to collect:" }, { "Westfall Stew", "Patrolling Westfall", "Bounty on Murlocs", "Wanted Poster" })
 ask("kill and loot quests", { "Kill and loot quests to pick up in Westfall", "Goretusk Liver Pie", "Westfall Stew" },
     { "Patrolling Westfall", "Bounty on Murlocs" })
+-- Quests finished with AH reagents: Westfall Stew (6 Linen Cloth, a mob-dropped trade good, 9s
+-- on the AH by now) yes; Red Linen Goods (also kills) and Goretusk Liver Pie (kills only) no.
+ask("what reagent quests are in my level range", { "Quests you can finish with AH reagents (1)",
+    "Westfall Stew", "6 Linen Cloth ~54s", "hand in |cffffd100Gryan Stoutmantle" },
+    { "Red Linen Goods", "Goretusk Liver Pie", "Bounty on Murlocs" })
+bags[2589] = 2
+ask("cost to complete westfall stew", { "Westfall Stew", "4 Linen Cloth", "(have 2)", "x 9s = 36s",
+    "Hand in: |cffffd100Gryan Stoutmantle" })
+ask("|cffffff00|Hquest:109:15|h[Westfall Stew]|h|r cost to complete", { "4 Linen Cloth", "= 36s" }, { "starts at" })
+ask("|cffffff00|Hquest:103:10|h[Red Linen Goods]|h|r how much would it cost", { "4 Linen Cloth",
+    "plus objectives you can't buy" })
+ask("|cffffff00|Hquest:110:16|h[Goretusk Liver Pie]|h|r cost", "doesn't ask for items")
+bags[2589] = nil
 -- Quest names are links: clicking one asks about that quest.
 do
     local questLink
