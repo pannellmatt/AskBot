@@ -644,26 +644,49 @@ local SKILLUP_PATTERNS = { "^how do i level (.+)$", "^how to level (.+)$", "^how
     "^levelling (.+)$", "^leveling (.+)$", "^skill up (.+)$", "^(.+) skill ?ups?$", "^(.+) skill up plan$",
     "^(.+) levelling$", "^(.+) leveling$", "^(.+) guide$", "^best (.+) skill ?ups$", "^what (.+) should i craft$",
     "^what should i craft for (.+)$" }
+-- Looser: a levelling word anywhere plus a profession ("cheapest leveling [Blacksmithing (Apprentice)]").
+local SKILLUP_WORDS = { " leveling ", " levelling ", " level up ", " skill up ", " skill ups ", " skillup ", " skillups ",
+    " to level ", " i level " }
+local SKILLUP_FILLER = { cheapest = true, way = true, to = true, the = true, a = true, my = true, up = true,
+    apprentice = true, journeyman = true, expert = true, artisan = true, master = true }
+
+--- The profession a skill-up question names, or nil.
+local function skillUpProfession(q)
+    for _, pattern in ipairs(SKILLUP_PATTERNS) do
+        local s = q:match(pattern)
+        local prof = s and professionNamed(s)
+        if prof then return prof end
+    end
+    local padded = " " .. q .. " "
+    if padded:find(" trainers? ") then return nil end
+    for _, w in ipairs(SKILLUP_WORDS) do
+        if padded:find(w, 1, true) then return (professionNamed(q)) end
+    end
+    -- Misspellings (levling, lvling, leveing, lvl) and "cheapest [Blacksmithing]" with nothing else.
+    local others = false
+    for word in q:gmatch("%S+") do
+        if word:match("^l[ev]*l+i?n?g?$") or word:match("^l[ev]*l+i?n?g?up$") or word:match("^lv?l+$") then
+            return (professionNamed(q))
+        end
+        if not (SKILLUP_FILLER[word] or professionNamed(word)) then others = true end
+    end
+    if not others and padded:find(" cheapest ", 1, true) then return (professionNamed(q)) end
+end
 
 --- Is `q` a profession question that needs your own recipes or skills? (For "!ask".)
 local function personalProfession(q)
-    for _, list in ipairs({ MATS_PATTERNS, SKILLUP_PATTERNS }) do
-        for _, pattern in ipairs(list) do
-            local s = q:match(pattern)
-            if s and (list == MATS_PATTERNS or professionNamed(s)) then return true end
-        end
+    for _, pattern in ipairs(MATS_PATTERNS) do
+        if q:match(pattern) then return true end
     end
+    if skillUpProfession(q) then return true end
     return q == "what should i craft"
 end
 
 --- Answers profession questions; returns true if it did.
 local function professionQuestion(q, isServiceQuestion)
     -- Skill-ups need a profession named.
-    for _, pattern in ipairs(SKILLUP_PATTERNS) do
-        local s = q:match(pattern)
-        local prof = s and professionNamed(s)
-        if prof then answerSkillUp(prof); return true end
-    end
+    local skillUp = skillUpProfession(q)
+    if skillUp then answerSkillUp(skillUp); return true end
     if q == "what should i craft" then
         local any, done = false, {}
         for prof in pairs(recordedProfessions()) do any = true; done[prof] = true; answerSkillUp(prof) end

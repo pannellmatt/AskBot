@@ -1110,6 +1110,15 @@ ask("what do i need to make brown linen pants", { "Brown Linen Pants", "have 1, 
 ask("how do i level tailoring", { "Tailoring 75/75: cheapest skill-ups", "at your cap", "[Tailoring trainer]",
     "Brown Linen Pants]|r |cffff8040orange|r - mats 4s 10c", "Linen Bag]|r |cffffff00yellow|r - mats 8s 30c", "[list]" },
     { "Bolt of Linen Cloth]|r |c" })
+-- A profession link with words around it ("cheapest leveling [Blacksmithing (Apprentice)]")
+ask("cheapest leveling |cffffd000|Htrade:Player-1:2018:164|h[Tailoring (Apprentice)]|h|r", "Tailoring 75/75: cheapest skill-ups",
+    { "Nearest" })
+ask("cheapest tailoring levelling", "Tailoring 75/75: cheapest skill-ups")
+ask("cheapest levling |cffffd000|Htrade:Player-1:2018:164|h[Tailoring]|h|r", "Tailoring 75/75: cheapest skill-ups")
+ask("lvl tailoring", "Tailoring 75/75: cheapest skill-ups")
+ask("cheapest tailoring", "Tailoring 75/75: cheapest skill-ups")
+ask("cheapest way to level tailoring", "Tailoring 75/75: cheapest skill-ups")
+ask("nearest tailoring trainer for levelling up", "Tailoring trainer", { "cheapest skill-ups" })
 ask("recipe for red linen bag", { "Pattern: Red Linen Bag", "Thread Seller" })
 ask("recipe for linen bag", { "You already know", "(Tailoring)", "[mats]" })
 ask("how do i learn flying carpet", "No pattern, plan or recipe item teaches \"flying carpet\"")
