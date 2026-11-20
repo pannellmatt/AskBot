@@ -514,12 +514,49 @@ local function craftChance(c, skill)
     return math.max(0.05, (c.grey - skill) / math.max(1, c.grey - c.yellow))
 end
 
+--- AtlasLoot's colour thresholds are Classic's; Forever changed some (Coarse Grinding Stone is
+--- green at 75, Classic yellow). For a recipe you know, your window recorded its colour at your
+--- skill then (p.rank): move the thresholds just enough to agree. Returns the craft (a copy with
+--- fitted yellow/green/grey when they moved) and whether your window agrees with AtlasLoot's
+--- numbers (only then is the yellow % more than an estimate: a moved threshold is a guess).
+local WINDOW_COLOUR = { optimal = "orange", medium = "yellow", easy = "green", trivial = "grey" }
+local function fitToWindow(c, p)
+    local name = AskBot.Crafts.Name(c)
+    local r = name and p and p.recipes and p.recipes[D.NameKey(name)]
+    local at = p and p.rank
+    if not (r and WINDOW_COLOUR[r.diff] and at) then return c, false end
+    local y, g, gr = c.yellow, c.green, c.grey
+    if r.diff == "optimal" then
+        y = math.max(y, at + 1); g = math.max(g, y); gr = math.max(gr, g)
+    elseif r.diff == "medium" then
+        y = math.min(y, at); g = math.max(g, at + 1); gr = math.max(gr, g)
+    elseif r.diff == "easy" then
+        g = math.min(g, at); y = math.min(y, g); gr = math.max(gr, at + 1)
+    else
+        gr = math.min(gr, at); g = math.min(g, gr); y = math.min(y, g)
+    end
+    if y == c.yellow and g == c.green and gr == c.grey then return c, true end
+    return setmetatable({ yellow = y, green = g, grey = gr }, { __index = c }), false
+end
+
+--- Your profession's crafts with thresholds fitted to your window: list of crafts, and a set of
+--- the ones whose numbers your window confirms.
+local function fittedCrafts(prof, p)
+    local list, vouched = {}, {}
+    for _, c in ipairs(AskBot.Crafts.byProf[prof]) do
+        local f, ok = fitToWindow(c, p)
+        list[#list + 1] = f
+        if ok then vouched[f] = true end
+    end
+    return list, vouched
+end
+
 --- Plays out levelling from `rank` to `target`: each point goes to the craft with the cheapest
 --- expected cost per point (mats you hold at their sale value, the rest bought, training paid
 --- once), using up your stock as it goes. Orange and yellow crafts you know or a trainer teaches.
 --- Returns { steps = { { c, from, to, crafts } }, buy = { [id] = n }, cost, spare = { [id] = n },
 --- reached } or nil.
-local function planSkillUps(prof, rank, target, known, trainCosts)
+local function planSkillUps(prof, rank, target, known, trainCosts, crafts)
     local C = AskBot.Crafts
     local stock, startStock, buy, learned = {}, {}, {}, {}
     local function have(id)
@@ -537,7 +574,7 @@ local function planSkillUps(prof, rank, target, known, trainCosts)
     local steps, cost, skill = {}, 0, rank
     while skill < target do
         local best, bestCost
-        for _, c in ipairs(C.byProf[prof]) do
+        for _, c in ipairs(crafts) do
             local colour = C.Colour(c, skill)
             if (colour == "orange" or colour == "yellow") and (isKnown(c) or not c.recipe) then
                 for _, g in ipairs(c.reagents) do have(g.id) end
@@ -706,7 +743,8 @@ local function answerSkillUp(prof)
         for k in pairs(p and p.recipes or {}) do known[k] = true end
         local trainCosts = AskBotDB and AskBotDB.recipeTraining or {}
         local list, nextAt = {}, nil
-        for _, c in ipairs(C.byProf[prof]) do
+        local crafts, vouched = fittedCrafts(prof, p)
+        for _, c in ipairs(crafts) do
             local colour = C.Colour(c, rank)
             if colour == "orange" or colour == "yellow" then
                 local name = C.Name(c)
@@ -721,7 +759,7 @@ local function answerSkillUp(prof)
                 local chance = colour == "orange" and 1 or math.max(0.05, (c.grey - rank) / math.max(1, c.grey - c.yellow))
                 local perPoint = cost / chance + (train or 0) / math.max(1, c.grey - rank)
                 list[#list + 1] = { c = c, name = name or "?", colour = colour, how = how, cost = cost, unknown = unknown,
-                    train = train, chance = chance, perPoint = perPoint, inBags = inBags }
+                    train = train, chance = chance, perPoint = perPoint, inBags = inBags, vouched = vouched[c] }
             elseif colour == "unlearnable" and not c.recipe and (not nextAt or c.learn < nextAt) then
                 nextAt = c.learn
             end
@@ -747,12 +785,13 @@ local function answerSkillUp(prof)
             local cost = matsLabel(e)
             local how = e.how == 1 and GREY .. "(known)|r" or ("learn: " .. learnFrom(c)
                 .. (e.train and (e.train == 0 and " free" or (" " .. AskBot.Prices.Format(e.train))) or ""))
-            local odds = e.colour == "yellow" and (GREY .. " " .. math.floor(e.chance * 100 + 0.5) .. "%|r") or ""
+            -- Recipes your window hasn't shown use Classic's thresholds: an estimate ("~").
+            local odds = e.colour == "yellow" and (GREY .. " " .. (e.vouched and "" or "~") .. math.floor(e.chance * 100 + 0.5) .. "%|r") or ""
             say("  " .. (c.item and itemLinkText(c.item) or (GOLD .. e.name .. "|r")) .. " " .. COLOUR[e.colour] .. odds .. " - " .. cost
                 .. " " .. how .. " " .. makeLink("list", function() answerMats(craftAsRecipe(c), prof, 1) end))
         end
         if p and p.max and rank < p.max then
-            local plan = planSkillUps(prof, rank, p.max, known, trainCosts)
+            local plan = planSkillUps(prof, rank, p.max, known, trainCosts, crafts)
             if plan then sayPlan(plan, p.max) end
         end
         if nextAt then say(GREY .. "  New trainer recipes at " .. nextAt .. ".|r " .. trainerLink(prof)) end
@@ -811,7 +850,7 @@ local RECIPE_PATTERNS = { "^recipe for (.+)$", "^pattern for (.+)$", "^plans for
     "^where can i get the recipe for (.+)$", "^where can i learn (.+)$", "^how do i learn (.+)$", "^where do i learn (.+)$",
     "^who teaches (.+)$", "^where is the recipe for (.+)$" }
 local SKILLUP_PATTERNS = { "^how do i level (.+)$", "^how to level (.+)$", "^how should i level (.+)$", "^level up (.+)$",
-    "^levelling (.+)$", "^leveling (.+)$", "^skill up (.+)$", "^(.+) skill ?ups?$", "^(.+) skill up plan$",
+    "^levelling (.+)$", "^leveling (.+)$", "^skill up (.+)$", "^(.+) skill ?ups?$", "^(.+) skill up plan$", "^plan (.+)$", "^(.+) plan$", "^plan for (.+)$",
     "^(.+) levelling$", "^(.+) leveling$", "^(.+) guide$", "^best (.+) skill ?ups$", "^what (.+) should i craft$",
     "^what should i craft for (.+)$" }
 -- Looser: a levelling word anywhere plus a profession ("cheapest leveling [Blacksmithing (Apprentice)]").

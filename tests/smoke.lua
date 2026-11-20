@@ -1116,6 +1116,9 @@ ask("cheapest leveling |cffffd000|Htrade:Player-1:2018:164|h[Tailoring (Apprenti
 ask("cheapest tailoring levelling", "Tailoring 75/75: cheapest skill-ups")
 ask("cheapest levling |cffffd000|Htrade:Player-1:2018:164|h[Tailoring]|h|r", "Tailoring 75/75: cheapest skill-ups")
 ask("lvl tailoring", "Tailoring 75/75: cheapest skill-ups")
+ask("plan |cffffd000|Htrade:Player-1:2018:164|h[Tailoring]|h|r", "Tailoring 75/75: cheapest skill-ups")
+ask("plan for tailoring", "Tailoring 75/75: cheapest skill-ups")
+ask("plans for red linen bag", "Pattern: Red Linen Bag", { "cheapest skill-ups" })
 ask("cheapest tailoring", "Tailoring 75/75: cheapest skill-ups")
 ask("cheapest way to level tailoring", "Tailoring 75/75: cheapest skill-ups")
 ask("nearest tailoring trainer for levelling up", "Tailoring trainer", { "cheapest skill-ups" })
@@ -1170,7 +1173,7 @@ do
     AskBotDB.recipeTraining[AskBot.Data.NameKey("Handstitched Leather Boots")] = 0
     AskBotDB.recipeTraining[AskBot.Data.NameKey("Handstitched Leather Pants")] = 5000
     ask("how do i level leatherworking", { "Leatherworking 42: cheapest skill-ups:",
-        "[Handstitched Leather Boots]|r |cffffff00yellow|r", " 93%|r - mats 10c+ learn: ", " free ",
+        "[Handstitched Leather Boots]|r |cffffff00yellow|r", " ~93%|r - mats 10c+ learn: ", " free ",
         "[Handstitched Leather Pants]|r |cffff8040orange|r - mats 10c+ learn: ", " 50s " })
     lw[3] = 35
     -- A plan to your cap: priced Light Leather (1s on the AH), 40 in your bags.
@@ -1181,6 +1184,14 @@ do
     -- More than the plan uses: the rest is worth selling (1s less the 5% cut each).
     bags[2318] = 200
     ask("how do i level leatherworking", { "Not needed, sell for ~27s 55c:", "29 |cffffffff[Light Leather]" }, { "Buy: 1" })
+    -- Your window beats AtlasLoot: it showed the Boots green at 35 (AtlasLoot: orange), so they're
+    -- out; it showed the Pants yellow (AtlasLoot: orange), so they show a chance with no "~".
+    local NK = AskBot.Data.NameKey
+    AskBotCharDB.professions.Leatherworking = { rank = 35, max = 75, recipes = {
+        [NK("Handstitched Leather Boots")] = { name = "Handstitched Leather Boots", diff = "easy", reagents = {} },
+        [NK("Handstitched Leather Pants")] = { name = "Handstitched Leather Pants", diff = "medium", reagents = {} } } }
+    ask("how do i level leatherworking", { "[Handstitched Leather Pants]|r |cffffff00yellow|r|cffaaaaaa ~100%" },
+        { "Handstitched Leather Boots]|r |c" })
     AskBotCharDB.professions.Leatherworking = nil
     bags[2318] = nil
 end
