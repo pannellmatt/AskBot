@@ -117,7 +117,7 @@ events:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 for _, event in ipairs({ "TRADE_SKILL_SHOW", "TRADE_SKILL_UPDATE", "TRADE_SKILL_LIST_UPDATE",
     "TRADE_SKILL_DATA_SOURCE_CHANGED", "CRAFT_SHOW", "CRAFT_UPDATE", "UPDATE_MOUSEOVER_UNIT", "PLAYER_TARGET_CHANGED",
     "UNIT_SPELLCAST_SUCCEEDED", "PLAYER_ENTERING_WORLD", "HEARTHSTONE_BOUND", "TRAINER_SHOW", "TRAINER_UPDATE",
-    "LEARNED_SPELL_IN_TAB" }) do
+    "LEARNED_SPELL_IN_TAB", "MERCHANT_SHOW" }) do
     local valid = not (C_EventUtils and C_EventUtils.IsEventValid) or C_EventUtils.IsEventValid(event)
     if valid then pcall(events.RegisterEvent, events, event) end
 end
@@ -188,6 +188,12 @@ events:SetScript("OnEvent", function(_, event, ...)
             ok, err = pcall(AskBot.WeaponMasters.Record)
             if not ok and geterrorhandler then geterrorhandler()(err) end
             ok, err = pcall(AskBot.Professions.recordTradeTraining)
+            if not ok and geterrorhandler then geterrorhandler()(err) end
+        end)
+    elseif event == "MERCHANT_SHOW" then
+        -- Give Auctionator and the bag data a moment, then sell junk.
+        C_Timer.After(0.3, function()
+            local ok, err = pcall(AskBot.Junk.OnMerchant)
             if not ok and geterrorhandler then geterrorhandler()(err) end
         end)
     elseif event == "LEARNED_SPELL_IN_TAB" then

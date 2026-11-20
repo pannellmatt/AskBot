@@ -409,7 +409,15 @@ function Gear.Current(weights, classFile)
     local oh, ohLink = slot(17)
     local mhLoc = mhLink and itemInfoInstant(mhLink)
     local twoHanded = mhLoc == "INVTYPE_2HWEAPON"
-    out.twohand = { score = mh + oh, link = mhLink }
+    -- Against a two-hander, a shield's armour is worth little to a damage spec (tank weights
+    -- value block; others don't): count only its other stats, so a weapon + shield doesn't
+    -- outscore a two-handed damage upgrade on armour alone.
+    local ohForTwoHand = oh
+    if not twoHanded and ohLink and not weights.BLOCK and itemInfoInstant(ohLink) == "INVTYPE_SHIELD" then
+        local armor = (Gear.Stats(ohLink) or {}).ARMOR or 0
+        ohForTwoHand = oh - (weights.ARMOR or 0) * armor
+    end
+    out.twohand = { score = mh + ohForTwoHand, link = mhLink }
     out.onehand = { score = mh, link = mhLink }
     if not twoHanded then
         local ohLoc = ohLink and itemInfoInstant(ohLink)

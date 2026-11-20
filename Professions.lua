@@ -480,8 +480,8 @@ local DIFF_LABEL = { optimal = "|cffff8040orange|r", medium = "|cffffff00yellow|
 --- What one craft's mats are worth (AH or vendor price, whether or not you have them),
 --- whether a needed mat has no price, and whether your bags and bank hold them all.
 -- The auction house's cut of a sale: 5% at the faction AHs (confirmed on Forever from an
--- "Auction successful" mail: 3x 1s 47c sold, 22c cut).
-local AH_CUT = 0.05
+-- "Auction successful" mail: 3x 1s 47c sold, 22c cut). Set in Junk.lua.
+local AH_CUT = AskBot.Junk.AH_CUT
 
 --- What a mat you already hold is worth to you: what you'd get selling it on the AH (after the
 --- cut), or what it costs from a vendor (you'd only buy it again). nil if neither is known.

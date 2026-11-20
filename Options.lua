@@ -10,6 +10,8 @@ local DEFAULTS = {
     shareParty = false,   -- ... in party and raid chat
     shareWhisper = false, -- ... in whispers
     rareAlerts = true,    -- say when a zone you enter has a rare that drops an upgrade
+    autoVendor = true,    -- sell junk at merchants (unless the AH pays clearly more)
+    junkOffSpec = true,   -- ...but keep gear that's an upgrade for any of your class's specs
 }
 AskBot.DEFAULTS = DEFAULTS
 
@@ -50,6 +52,14 @@ local function registerPanel()
 
     checkbox("rareAlerts", "Rare alerts",
         "When you enter a zone, say if a rare mob near your level there can drop an upgrade for you.")
+
+    checkbox("autoVendor", "Sell junk at merchants",
+        "When you open a merchant, sell grey items and weapons and armour you can't use or have outgrown, and food and drink 10+ levels below yours, unless the "
+        .. "auction house pays at least 1.5x the vendor price and 1s more (Auctionator). Sells 12 at a time, the "
+        .. "buyback size; click [sell] in chat for more.")
+    checkbox("junkOffSpec", "Keep gear for other specs",
+        "When selling junk, keep gear that's an upgrade for any of your class's specs (a two-hander while you tank). "
+        .. "Off: only your current spec counts.")
 
     checkbox("shareGuild", "Answer !ask in guild chat",
         "When a guild member types '!ask <question>' in guild chat, AskBot answers there for them.")

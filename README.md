@@ -86,6 +86,7 @@ AskBot compares what you're wearing with gear you can get soon: rewards from que
 - **Not usable yet?** Items you'll be able to use within two levels are still listed, marked e.g. *(at 26)*, *(Plate Mail at 40)* or *(train Two-Handed Axes)* with a link to the nearest weapon master.
 - `/ab is [item] an upgrade?` (or `is Militia Leggings better`, `should I use [item]`, `[item] upgrade as tank`): one item against what you're wearing, e.g. *+35% over [Worn Leggings]*, or why your class can't use it.
 - `/ab anything in my bags an upgrade?` (or `any upgrades in my bags`, `bag upgrades as tank`): every piece of gear in your bags that beats what you're wearing, biggest gain first.
+- **Junk selling:** when you open a merchant, AskBot sells grey items, weapons and armour your class can't use or has outgrown (5+ levels below you and not an upgrade for any of your specs), and food and drink 10+ levels below you, bound or not. It keeps anything the AH pays clearly more for (1.5x the vendor price and 1s more, after the 5% cut) and lists it, keeps greens and blues with no AH price yet, and never sells profession tools, fishing poles, potions, quest items or epics. The first 12 sell straight away (all buyable back); a [sell] link in chat sells the next 12.
 - **Rare alerts:** when you enter a zone, AskBot says if a rare mob near your level there can drop an upgrade for you, with a pin. Turn it off in `/ab options`.
 - Items are scored with simple stat weights per spec, so treat the list as a guide. Bonuses that only appear as "Equip:" lines (spell damage, attack power, hit, crit, mana regen) are read from the item's tooltip. `/ab debug item [item]` shows an item's stats and score.
 
@@ -172,6 +173,7 @@ Thor <Gryphon Master> - Westfall 56.6, 52.6 (71 yds, <1 min)
 - whether to pin the best answer automatically
 - how many results to list (1-5)
 - rare alerts when you enter a zone
+- selling junk at merchants, and whether gear for your other specs counts as junk
 - which chats friends can `!ask` in
 
 ---

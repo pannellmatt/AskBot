@@ -448,5 +448,6 @@ AskBot.CheckRares = checkRares
 GearAnswers.wordSet, GearAnswers.gearQuestion = wordSet, gearQuestion
 GearAnswers.answerUpgrades, GearAnswers.answerIsUpgrade = answerUpgrades, answerIsUpgrade
 GearAnswers.isGear, GearAnswers.asksUpgrade = isGear, asksUpgrade
+GearAnswers.beatsWorn = beatsWorn
 GearAnswers.bagUpgradeQuestion, GearAnswers.answerBagUpgrades = bagUpgradeQuestion, answerBagUpgrades
 GearAnswers.UPGRADE_NAME_PATTERNS, GearAnswers.checkRares = UPGRADE_NAME_PATTERNS, checkRares

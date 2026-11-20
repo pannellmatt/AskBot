@@ -1333,6 +1333,133 @@ bagItems = { 9005, 9030 }
 ask("any upgrades in my bags?", "Nothing in your bags beats what you wear for Arms Warrior")
 bagItems = { 9030 }
 ask("is anything in my inventory better", "There's no gear in your bags.")
+-- Selling junk at a merchant: 13 grey items (12 sell, then a [sell] link for the last), a wand a
+-- warrior can't use (AH barely more: vendor it), an outgrown tunic, a tunic better sold on the AH,
+-- a green wand with no AH price (kept), and gear you'd still use (kept quietly).
+do
+    gear[9016] = { "Frayed Tunic", "INVTYPE_CHEST", 4, 3, 5, 8, { ITEM_MOD_STAMINA_SHORT = 1 }, true }
+    gear[9017] = { "Fine Tunic", "INVTYPE_CHEST", 4, 3, 5, 8, { ITEM_MOD_STAMINA_SHORT = 1 }, true }
+    gear[9018] = { "Cracked Wand", "INVTYPE_RANGEDRIGHT", 2, 19, 5, 8, { ITEM_MOD_DAMAGE_PER_SECOND_SHORT = 2 }, true }
+    -- The Mining Pick is a low white one-hander, but a profession tool: never sold.
+    gear[2901] = { "Mining Pick", "INVTYPE_WEAPON", 2, 0, 0, 4, { ITEM_MOD_DAMAGE_PER_SECOND_SHORT = 1 }, true }
+    -- Worse than the worn leggings for Arms (your spec), better for Protection: off-spec, kept.
+    gear[9019] = { "Bulky Leggings", "INVTYPE_LEGS", 4, 3, 5, 8, { ITEM_MOD_STAMINA_SHORT = 3 }, true }
+    for _, id in ipairs({ 9016, 9017, 9018, 2901, 9019 }) do itemCache[id] = gear[id][1] end
+    itemCache[9190] = "Broken Fang"
+    -- id -> { quality, vendor price }
+    local junkInfo = { [9190] = { 0, 50 }, [9005] = { 2, 100 }, [9016] = { 1, 30 }, [9017] = { 2, 40 },
+        [9018] = { 2, 60 }, [9001] = { 2, 500 }, [2901] = { 1, 2 }, [9019] = { 1, 20 } }
+    local realInfo = C_Item.GetItemInfo
+    C_Item.GetItemInfo = function(id)
+        local n = tonumber(id) or tonumber(tostring(id):match("item:(%d+)"))
+        local j = junkInfo[n]
+        if not j then return realInfo(id) end
+        local name, link, _, ilvl, req = realInfo(id)
+        name = name or itemCache[n]
+        link = link or ("|cff9d9d9d|Hitem:" .. n .. "::|h[" .. name .. "]|h|r")
+        return name, link, j[1], ilvl or 1, req or 0, nil, nil, nil, nil, nil, j[2], gear[n] and gear[n][3] or 15
+    end
+    ahPrices[9005], ahAges[9005] = 120, 0     -- 114 after the cut: not worth listing
+    ahPrices[9017], ahAges[9017] = 5000, 0    -- 47s 50c after the cut vs 40c: list it
+    local slots = {}
+    for i = 1, 13 do slots[i] = 9190 end
+    for _, id in ipairs({ 9005, 9016, 9017, 9018, 9001, 2901, 9019 }) do slots[#slots + 1] = id end
+    local soldIds = {}
+    C_Container = { GetContainerNumSlots = function(bag) return bag == 0 and #slots or 0 end,
+        GetContainerItemID = function(_, slot) return slots[slot] end,
+        GetContainerItemInfo = function(_, slot) return slots[slot] and { stackCount = 1, isLocked = false } end,
+        UseContainerItem = function(_, slot) soldIds[#soldIds + 1] = slots[slot]; slots[slot] = false end }
+    MerchantFrame = { IsShown = function() return true end }
+    local from = #output + 1
+    print("\n> MERCHANT_SHOW")
+    fire("MERCHANT_SHOW")
+    advance(1)
+    local text = table.concat(output, "\n", from)
+    for _, e in ipairs({ "Sold 12 junk items for 6s", "3 more for 1s 80c", "Better on the AH: ", "Fine Tunic",
+        "~47s 50c", "(vendor 40c)", "Kept, no AH price yet:", "Cracked Wand" }) do
+        if not text:find(e, 1, true) then failures = failures + 1; print("   !! FAIL: expected " .. e) end
+    end
+    if #soldIds ~= 12 then failures = failures + 1; print("   !! FAIL: sold " .. #soldIds .. ", expected 12") end
+    for _, id in ipairs(soldIds) do
+        if id ~= 9190 then failures = failures + 1; print("   !! FAIL: sold " .. tostring(id) .. " in the first 12") end
+    end
+    -- Click [sell]: the grey, the wand and the outgrown tunic go; the leggings never do.
+    local sellLink
+    for i = from, #output do sellLink = output[i]:match("|H(addon:askbot:%d+)|h%[sell%]") or sellLink end
+    print("\n> click [sell]")
+    linkCallback(nil, sellLink)
+    local sold = {}
+    for _, id in ipairs(soldIds) do sold[id] = (sold[id] or 0) + 1 end
+    if sold[9190] ~= 13 or sold[9005] ~= 1 or sold[9016] ~= 1 or sold[9017] or sold[9018] or sold[9001] or sold[2901] or sold[9019] then
+        failures = failures + 1; print("   !! FAIL: [sell] sold the wrong items")
+    end
+    -- Soulbound: the AH can't take it, so the unpriced green wand sells after all.
+    slots = { 9018 }
+    soldIds = {}
+    C_Container.GetContainerItemInfo = function(_, slot) return slots[slot] and { stackCount = 1, isLocked = false, isBound = true } end
+    fire("MERCHANT_SHOW")
+    advance(1)
+    if soldIds[1] ~= 9018 then failures = failures + 1; print("   !! FAIL: soulbound unpriced green not sold") end
+    C_Container.GetContainerItemInfo = function(_, slot) return slots[slot] and { stackCount = 1, isLocked = false } end
+    -- Food: Haunch of Meat (level 5) sells at 20; a level-15 snack doesn't yet; a level-3 potion
+    -- never does (food and drink only). A grey worth 1s 31c on the AH vs 15c at the vendor stays.
+    itemCache[9191], itemCache[9192], itemCache[9195], itemCache[9196] = "Haunch of Meat", "Hearty Snack",
+        "Lesser Healing Potion", "Odd Trinket"
+    junkInfo[9191], junkInfo[9192], junkInfo[9195], junkInfo[9196] = { 1, 12 }, { 1, 25 }, { 1, 100 }, { 0, 15 }
+    ahPrices[9196], ahAges[9196] = 138, 0
+    local consumableReq = { [9191] = 5, [9192] = 15, [9195] = 3 }
+    local consumableSub = { [9191] = 5, [9192] = 5, [9195] = 1 }
+    local withJunk = C_Item.GetItemInfo
+    C_Item.GetItemInfo = function(id)
+        local n = tonumber(id) or tonumber(tostring(id):match("item:(%d+)"))
+        if consumableReq[n] then
+            return itemCache[n], "|cffffffff|Hitem:" .. n .. "::|h[" .. itemCache[n] .. "]|h|r", 1, 5, consumableReq[n],
+                nil, nil, nil, "", nil, junkInfo[n][2], 0, consumableSub[n]
+        end
+        return withJunk(id)
+    end
+    slots, soldIds = { 9191, 9192, 9195, 9196 }, {}
+    local junkFrom = #output + 1
+    fire("MERCHANT_SHOW")
+    advance(1)
+    if not table.concat(output, "\n", junkFrom):find("Odd Trinket", 1, true) then
+        failures = failures + 1; print("   !! FAIL: cheap grey worth 9x on the AH not listed")
+    end
+    if soldIds[1] ~= 9191 or soldIds[2] then failures = failures + 1; print("   !! FAIL: food: sold " .. table.concat(soldIds, ",")) end
+    C_Item.GetItemInfo = withJunk
+    -- Sword and shield vs a two-hander: the shield's armour doesn't count for Arms, so the
+    -- two-handed damage upgrade is kept (it lost to the shield's armour before).
+    gear[9193] = { "Test Shield", "INVTYPE_SHIELD", 4, 6, 10, 15, { RESISTANCE0_NAME = 400, ITEM_MOD_STRENGTH_SHORT = 2, ITEM_MOD_STAMINA_SHORT = 3 }, true }
+    gear[9194] = { "Test Greataxe", "INVTYPE_2HWEAPON", 2, 1, 5, 10, { ITEM_MOD_DAMAGE_PER_SECOND_SHORT = 6, ITEM_MOD_STRENGTH_SHORT = 3, ITEM_MOD_STAMINA_SHORT = 4 }, true }
+    itemCache[9193], itemCache[9194] = "Test Shield", "Test Greataxe"
+    junkInfo[9194] = { 2, 100 }
+    equipped[17] = 9193
+    slots, soldIds = { 9194 }, {}
+    C_Container.GetContainerItemInfo = function(_, slot) return slots[slot] and { stackCount = 1, isLocked = false, isBound = true } end
+    fire("MERCHANT_SHOW")
+    advance(1)
+    if soldIds[1] then failures = failures + 1; print("   !! FAIL: sold the two-handed upgrade") end
+    equipped[17] = nil
+    -- "Keep gear for other specs" off: leggings only Protection wants are sold.
+    AskBotDB.junkOffSpec = false
+    slots, soldIds = { 9019 }, {}
+    fire("MERCHANT_SHOW")
+    advance(1)
+    if soldIds[1] ~= 9019 then failures = failures + 1; print("   !! FAIL: off-spec leggings kept with the setting off") end
+    AskBotDB.junkOffSpec = nil
+    C_Container.GetContainerItemInfo = function(_, slot) return slots[slot] and { stackCount = 1, isLocked = false } end
+    gear[9193], gear[9194] = nil, nil
+    -- Turned off: nothing sells.
+    AskBotDB.autoVendor = false
+    slots = { 9190 }
+    soldIds = {}
+    fire("MERCHANT_SHOW")
+    advance(1)
+    if #soldIds ~= 0 then failures = failures + 1; print("   !! FAIL: sold with autoVendor off") end
+    AskBotDB.autoVendor = nil
+    C_Item.GetItemInfo, MerchantFrame = realInfo, nil
+    for _, id in ipairs({ 9016, 9017, 9018, 2901, 9019 }) do gear[id] = nil end
+end
 C_Container = nil
 
 -- Settings and "!ask" from other players --------------------------------------------------
