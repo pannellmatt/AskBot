@@ -187,6 +187,8 @@ events:SetScript("OnEvent", function(_, event, ...)
             if not ok and geterrorhandler then geterrorhandler()(err) end
             ok, err = pcall(AskBot.WeaponMasters.Record)
             if not ok and geterrorhandler then geterrorhandler()(err) end
+            ok, err = pcall(AskBot.Professions.recordTradeTraining)
+            if not ok and geterrorhandler then geterrorhandler()(err) end
         end)
     elseif event == "LEARNED_SPELL_IN_TAB" then
         pcall(AskBot.LearnedSpell, (...))
@@ -250,6 +252,11 @@ local function status()
         and ("yes, " .. watched .. " price" .. (watched == 1 and "" or "s") .. " on your refresh list"
             .. (AskBotCharDB.refreshPending and " (refresh at next AH visit)" or ""))
         or "not installed") .. ".")
+    local C = AskBot.Crafts
+    local nCrafts = 0
+    for _ in pairs(C.bySpell) do nCrafts = nCrafts + 1 end
+    say("AtlasLoot crafting: " .. (C.status == "ready" and (nCrafts .. " recipes") or C.status == "loading" and "loading..."
+        or ("not used" .. (C.why and (" (" .. C.why .. ")") or (_G.AtlasLoot and " (not started)" or "")))) .. ".")
     if D.status == "ready" then
         local parts = {}
         for _, t in ipairs(AskBot.targets) do

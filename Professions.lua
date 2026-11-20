@@ -475,6 +475,39 @@ end
 local DIFF_LABEL = { optimal = "|cffff8040orange|r", medium = "|cffffff00yellow|r", easy = "|cff40c040green|r" }
 
 --- How to level a profession.
+--- Profession trainer windows: what each recipe costs to train, account-wide (the same for
+--- every character): AskBotDB.recipeTraining[NameKey(recipe)] = copper.
+--- What one craft's mats are worth (AH or vendor price, whether or not you have them),
+--- whether a needed mat has no price, and whether your bags and bank hold them all.
+local function matsValue(reagents)
+    local cost, unknown, inBags = 0, false, true
+    for _, g in ipairs(reagents) do
+        local price = reagentPrice(g.id)
+        local short = g.count - bagCount(g.id, true) > 0
+        if short then inBags = false end
+        if price then cost = cost + price * g.count elseif short then unknown = true end
+    end
+    return cost, unknown, inBags
+end
+
+--- "mats 1s 20c (in bags)", "mats 10c+", "mats ?"
+local function matsLabel(e)
+    return "mats " .. (e.cost > 0 and AskBot.Prices.Format(e.cost) or (e.unknown and "?" or "free"))
+        .. (e.unknown and e.cost > 0 and "+" or "") .. (e.inBags and " |cff40ff40(in bags)|r" or "")
+end
+
+local function recordTradeTraining()
+    if not (IsTradeskillTrainer and IsTradeskillTrainer() and GetNumTrainerServices and GetTrainerServiceInfo) then return end
+    AskBotDB = AskBotDB or {}
+    local costs = AskBotDB.recipeTraining or {}
+    AskBotDB.recipeTraining = costs
+    for i = 1, (GetNumTrainerServices() or 0) do
+        local name, a, b = GetTrainerServiceInfo(i)
+        local cost = GetTrainerServiceCost and GetTrainerServiceCost(i)
+        if name and a ~= "header" and b ~= "header" and type(cost) == "number" then costs[D.NameKey(name)] = cost end
+    end
+end
+
 local function answerSkillUp(prof)
     if prof == "Mining" or prof == "Herbalism" then return answerGatherBest(prof) end
     local rank = professionSkill(prof)
@@ -543,30 +576,36 @@ local function answerSkillUp(prof)
         if not rank then return say("Open your " .. prof .. " window once so I can see your skill, then ask again.") end
         local known = {}
         for k in pairs(p and p.recipes or {}) do known[k] = true end
+        local trainCosts = AskBotDB and AskBotDB.recipeTraining or {}
         local list, nextAt = {}, nil
         for _, c in ipairs(C.byProf[prof]) do
             local colour = C.Colour(c, rank)
             if colour == "orange" or colour == "yellow" then
                 local name = C.Name(c)
-                local cost, unknown = 0, false
-                for _, g in ipairs(c.reagents) do
-                    local price = reagentPrice(g.id)
-                    local short = math.max(0, g.count - bagCount(g.id, true))
-                    if short > 0 then
-                        if price then cost = cost + price * short else unknown = true end
-                    end
-                end
+                local cost, unknown, inBags = matsValue(c.reagents)
                 local how = (name and known[D.NameKey(name)]) and 1 or (c.recipe and 3 or 2)
-                list[#list + 1] = { c = c, name = name or "?", colour = colour, how = how, cost = cost, unknown = unknown }
+                -- A trainer recipe you haven't learned: add what it costs to train (once a profession
+                -- trainer window has shown it), so it ranks fairly against the ones you know.
+                local train = how == 2 and name and trainCosts[D.NameKey(name)] or nil
+                -- Cost per skill point: orange always gives one, yellow only with chance
+                -- (grey - skill) / (grey - yellow); training is paid once, so spread it over the
+                -- points the recipe can give before it goes grey.
+                local chance = colour == "orange" and 1 or math.max(0.05, (c.grey - rank) / math.max(1, c.grey - c.yellow))
+                local perPoint = cost / chance + (train or 0) / math.max(1, c.grey - rank)
+                list[#list + 1] = { c = c, name = name or "?", colour = colour, how = how, cost = cost, unknown = unknown,
+                    train = train, chance = chance, perPoint = perPoint, inBags = inBags }
             elseif colour == "unlearnable" and not c.recipe and (not nextAt or c.learn < nextAt) then
                 nextAt = c.learn
             end
         end
         table.sort(list, function(a, b)
+            -- Recipes you know and trainer recipes compete on cost per skill point (orange beats
+            -- yellow only when it's no dearer per point); recipe items to hunt down go last.
+            if (a.how == 3) ~= (b.how == 3) then return b.how == 3 end
+            if a.unknown ~= b.unknown then return not a.unknown end
+            if a.perPoint ~= b.perPoint then return a.perPoint < b.perPoint end
             if a.colour ~= b.colour then return a.colour == "orange" end
             if a.how ~= b.how then return a.how < b.how end
-            if a.unknown ~= b.unknown then return not a.unknown end
-            if a.cost ~= b.cost then return a.cost < b.cost end
             return a.name < b.name
         end)
         local atCap = p and p.max and rank >= p.max
@@ -577,14 +616,21 @@ local function answerSkillUp(prof)
         for i = 1, math.min(5, #list) do
             local e = list[i]
             local c = e.c
-            local cost = e.cost == 0 and not e.unknown and "|cff40ff40mats in bags|r"
-                or ("mats " .. (e.cost > 0 and AskBot.Prices.Format(e.cost) or "?") .. (e.unknown and e.cost > 0 and "+" or ""))
-            local how = e.how == 1 and GREY .. "(known)|r" or ("learn: " .. learnFrom(c))
-            say("  " .. (c.item and itemLinkText(c.item) or (GOLD .. e.name .. "|r")) .. " " .. COLOUR[e.colour] .. " - " .. cost
+            local cost = matsLabel(e)
+            local how = e.how == 1 and GREY .. "(known)|r" or ("learn: " .. learnFrom(c)
+                .. (e.train and (e.train == 0 and " free" or (" " .. AskBot.Prices.Format(e.train))) or ""))
+            local odds = e.colour == "yellow" and (GREY .. " " .. math.floor(e.chance * 100 + 0.5) .. "%|r") or ""
+            say("  " .. (c.item and itemLinkText(c.item) or (GOLD .. e.name .. "|r")) .. " " .. COLOUR[e.colour] .. odds .. " - " .. cost
                 .. " " .. how .. " " .. makeLink("list", function() answerMats(craftAsRecipe(c), prof, 1) end))
         end
         if nextAt then say(GREY .. "  New trainer recipes at " .. nextAt .. ".|r " .. trainerLink(prof)) end
         return
+    end
+    if C and C.status == "loading" then
+        say(GREY .. "(Still reading AtlasLoot's recipes: ask again in a few seconds to include trainer recipes.)|r")
+    elseif p then
+        say(GREY .. "(Only recipes you know: " .. (C and C.status == "ready" and ("AtlasLoot has no " .. prof .. " recipes")
+            or (C and C.why) or "AtlasLoot's crafting data isn't loaded") .. ". /ab status shows why.)|r")
     end
     if not p then
         if rank == false then return say("You don't have " .. prof .. ". " .. trainerLink(prof)) end
@@ -594,15 +640,8 @@ local function answerSkillUp(prof)
     local list = {}
     for _, r in pairs(p.recipes) do
         if r.diff == "optimal" or r.diff == "medium" then
-            local cost, unknown = 0, false
-            for _, g in ipairs(r.reagents) do
-                local price = reagentPrice(g.id)
-                local short = math.max(0, g.count - bagCount(g.id, true))
-                if short > 0 then
-                    if price then cost = cost + price * short else unknown = true end
-                end
-            end
-            list[#list + 1] = { r = r, cost = cost, unknown = unknown }
+            local cost, unknown, inBags = matsValue(r.reagents)
+            list[#list + 1] = { r = r, cost = cost, unknown = unknown, inBags = inBags }
         end
     end
     table.sort(list, function(a, b)
@@ -620,8 +659,7 @@ local function answerSkillUp(prof)
     for i = 1, math.min(4, #list) do
         local e = list[i]
         local r = e.r
-        local cost = e.cost == 0 and not e.unknown and "|cff40ff40mats in bags|r"
-            or ("mats " .. (e.cost > 0 and AskBot.Prices.Format(e.cost) or "?") .. (e.unknown and e.cost > 0 and "+" or ""))
+        local cost = matsLabel(e)
         say("  " .. (r.item and itemLinkText(r.item) or (GOLD .. r.name .. "|r")) .. " " .. DIFF_LABEL[r.diff] .. " - " .. cost
             .. " " .. makeLink("list", function() answerMats(r, prof, 1) end))
     end
@@ -758,3 +796,4 @@ Professions.professionSkill, Professions.gatherLookup = professionSkill, gatherL
 Professions.answerGather, Professions.answerGatherBest = answerGather, answerGatherBest
 Professions.professionQuestion, Professions.recordRecipes = professionQuestion, recordRecipes
 Professions.personalProfession = personalProfession
+Professions.recordTradeTraining = recordTradeTraining

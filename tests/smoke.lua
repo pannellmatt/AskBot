@@ -486,7 +486,7 @@ AtlasLoot = {
                 { name = "Armor", [1] = { { 1, 2149 }, { 2, 2153 }, { 3, 2158 }, { 4, 2161 } } } } },
         },
     } },
-    Loader = { LoadModule = function(_, name, onLoad) onLoad(name); return true end },
+    Loader = { LoadModule = function(_, name, onLoad) onLoad(name) end },
     Data = {
         Droprate = { GetData = function(_, npc, item) return rates[npc] and rates[npc][item] end },
         -- [spell] = { createdItem, profession (3 = Leatherworking), learn, yellow, grey, reagents, counts }
@@ -1108,7 +1108,7 @@ ask("mats for 2 linen bag", { "[Linen Bag]|r x2 (Tailoring):", "  6 |cffffffff[B
     "sells for 50s each, so crafting saves 37s 70c each" })
 ask("what do i need to make brown linen pants", { "Brown Linen Pants", "have 1, buy 1" })
 ask("how do i level tailoring", { "Tailoring 75/75: cheapest skill-ups", "at your cap", "[Tailoring trainer]",
-    "Brown Linen Pants]|r |cffff8040orange|r - mats 4s 10c", "Linen Bag]|r |cffffff00yellow|r - mats 8s 30c", "[list]" },
+    "Brown Linen Pants]|r |cffff8040orange|r - mats 8s 10c", "Linen Bag]|r |cffffff00yellow|r - mats 12s 30c", "[list]" },
     { "Bolt of Linen Cloth]|r |c" })
 -- A profession link with words around it ("cheapest leveling [Blacksmithing (Apprentice)]")
 ask("cheapest leveling |cffffd000|Htrade:Player-1:2018:164|h[Tailoring (Apprentice)]|h|r", "Tailoring 75/75: cheapest skill-ups",
@@ -1149,6 +1149,31 @@ skillLines[#skillLines + 1] = { "Leatherworking", false, 35 }
 ask("how do i level leatherworking", { "Leatherworking 35: cheapest skill-ups:",
     "[Handstitched Leather Boots]|r |cffff8040orange|r - mats 10c+ learn: ", "[Leatherworking trainer]",
     "[Handstitched Leather Pants]|r |cffff8040orange|r", "New trainer recipes at 55." }, { "Fine Leather Boots", "Embossed" })
+-- A profession trainer window: training costs join the ranking (Pants 50c beats Boots 5s).
+do
+    local tsList = { { "Leatherworking", "header", true }, { "Handstitched Leather Boots", "available", 500 },
+        { "Handstitched Leather Pants", "available", 50 } }
+    local saved = { IsTradeskillTrainer, GetNumTrainerServices, GetTrainerServiceInfo, GetTrainerServiceCost }
+    function IsTradeskillTrainer() return true end
+    function GetNumTrainerServices() return #tsList end
+    function GetTrainerServiceInfo(i) return tsList[i][1], tsList[i][2] end
+    function GetTrainerServiceCost(i) return tsList[i][3] end
+    fire("TRAINER_SHOW")
+    advance(1)
+    IsTradeskillTrainer, GetNumTrainerServices, GetTrainerServiceInfo, GetTrainerServiceCost = saved[1], saved[2], saved[3], saved[4]
+    ask("how do i level leatherworking", { "[Handstitched Leather Pants]|r |cffff8040orange|r - mats 10c+ learn: ",
+        " 50c ", " 5s " })
+    -- Orange only wins when it's no dearer per point: at 42 the Boots are yellow (93%) but free
+    -- to train, the orange Pants cost 50s to train (~1s 50c a point over the 33 points left).
+    local lw = skillLines[#skillLines]
+    lw[3] = 42
+    AskBotDB.recipeTraining[AskBot.Data.NameKey("Handstitched Leather Boots")] = 0
+    AskBotDB.recipeTraining[AskBot.Data.NameKey("Handstitched Leather Pants")] = 5000
+    ask("how do i level leatherworking", { "Leatherworking 42: cheapest skill-ups:",
+        "[Handstitched Leather Boots]|r |cffffff00yellow|r", " 93%|r - mats 10c+ learn: ", " free ",
+        "[Handstitched Leather Pants]|r |cffff8040orange|r - mats 10c+ learn: ", " 50s " })
+    lw[3] = 35
+end
 ask("recipe for fine leather boots", { "[Fine Leather Boots]|r (Leatherworking 90): learn it from",
     "Pattern: Fine Leather Boots", "Thread Seller" })
 ask("how do i learn handstitched leather pants", "(Leatherworking 30): taught by trainers.")

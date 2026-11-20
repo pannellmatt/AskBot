@@ -174,19 +174,32 @@ function Crafts.Build()
     local AL = _G.AtlasLoot
     local P = AL and AL.Data and AL.Data.Profession
     if not (AL and AL.ItemDB and AL.ItemDB.Storage and AL.Loader and P and P.GetProfessionData) then
-        Crafts.status = "absent"
+        Crafts.status, Crafts.why = "absent", "AtlasLoot's profession API is missing"
         return
     end
     Crafts.status = "loading"
     local name = "AtlasLootClassic_Crafting"
     local loaded = false
+    -- LoadModule returns true (already loaded), nil (just loaded it, or AtlasLoot doesn't know
+    -- the module), "InCombat" (loads after combat) or a reason it can't ("DISABLED", "MISSING"...).
     local result = AL.Loader:LoadModule(name, function() loaded = true end)
-    if result == true then loaded = true end
-    if result == nil or result == "DISABLED" or result == "MISSING" then Crafts.status = "absent"; return end
-    while loaded == false do coroutine.yield() end
+    local function isLoaded()
+        if loaded or result == true then return true end
+        local api = C_AddOns and C_AddOns.IsAddOnLoaded or IsAddOnLoaded
+        return api and api(name) and true or false
+    end
+    if result ~= nil and result ~= true and result ~= "InCombat" then
+        Crafts.status, Crafts.why = "absent", "AtlasLootClassic_Crafting is " .. tostring(result):lower()
+        return
+    end
+    if result == nil and not isLoaded() then
+        Crafts.status, Crafts.why = "absent", "AtlasLootClassic_Crafting didn't load"
+        return
+    end
+    while not isLoaded() do coroutine.yield() end
 
     local mod = AL.ItemDB.Storage[name]
-    if type(mod) ~= "table" then Crafts.status = "absent"; return end
+    if type(mod) ~= "table" then Crafts.status, Crafts.why = "absent", "AtlasLootClassic_Crafting loaded no data"; return end
     local Recipe = AL.Data.Recipe
     for key, prof in pairs(mod) do
         if type(key) == "string" and key:sub(1, 2) ~= "__" and type(prof) == "table" and type(prof.items) == "table" then
