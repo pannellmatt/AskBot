@@ -1121,6 +1121,11 @@ ask("plan for tailoring", "Tailoring 75/75: cheapest skill-ups")
 ask("plans for red linen bag", "Pattern: Red Linen Bag", { "cheapest skill-ups" })
 ask("cheapest tailoring", "Tailoring 75/75: cheapest skill-ups")
 ask("cheapest way to level tailoring", "Tailoring 75/75: cheapest skill-ups")
+-- For profit: the bag sells for 47s 50c after the cut, mats 12s 30c bought; bolts need unpriced cloth.
+ask("|cffffd000|Htrade:Player-1:2018:164|h[Tailoring]|h|r for profit", { "Tailoring 75: most profitable crafts",
+    "[Linen Bag]|r |cff40ff40+35s 20c|r", "(sells 47s 50c, mats 12s 30c)", "|cffffff00(skill-up)", "[list]",
+    "no price for the item or a mat" }, { "cheapest skill-ups", "Bolt of Linen Cloth]|r |c" })
+ask("most profitable tailoring", "Tailoring 75: most profitable crafts")
 ask("nearest tailoring trainer for levelling up", "Tailoring trainer", { "cheapest skill-ups" })
 ask("recipe for red linen bag", { "Pattern: Red Linen Bag", "Thread Seller" })
 ask("recipe for linen bag", { "You already know", "(Tailoring)", "[mats]" })
@@ -1181,6 +1186,12 @@ do
     bags[2318] = 40
     AskBotCharDB.professions.Leatherworking = { rank = 35, max = 75, recipes = {} }
     ask("how do i level leatherworking", { "Plan to 75", " crafts, ~", "Buy: " })
+    -- For profit with AtlasLoot: Boots a trainer teaches sell for 19s after the cut, mats 2s 10c.
+    ahPrices[2302], ahAges[2302] = 2000, 0
+    ask("leatherworking for profit", { "Leatherworking 35: most profitable crafts",
+        "[Handstitched Leather Boots]|r |cff40ff40+16s 90c|r", "(sells 19s, mats 2s 10c)", "learn: " },
+        { "Fine Leather Boots" })
+    ahPrices[2302] = nil
     -- More than the plan uses: the rest is worth selling (1s less the 5% cut each).
     bags[2318] = 200
     ask("how do i level leatherworking", { "Not needed, sell for ~27s 55c:", "29 |cffffffff[Light Leather]" }, { "Buy: 1" })

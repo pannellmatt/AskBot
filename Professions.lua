@@ -839,6 +839,82 @@ local function answerSkillUp(prof)
     end
 end
 
+--- What one craft's output sells for: the AH price less the cut, or a vendor's price if that's
+--- more. Returns copper (for all `made`) and "AH" / "vendor", or nil.
+local function saleValue(item, made)
+    local P = AskBot.Prices
+    if not (item and P) then return nil end
+    local ah = P.Available() and P.Auction(item)
+    local net = ah and math.floor(ah * (1 - AH_CUT)) or nil
+    local vendor = P.VendorSell and P.VendorSell(item)
+    if vendor and (not net or vendor > net) then return vendor * (made or 1), "vendor" end
+    if net then return net * (made or 1), "AH" end
+end
+
+--- "blacksmithing for profit": crafts you know (or a trainer teaches at your skill) whose output
+--- sells for more than its mats bought now. Mats are priced at what you'd pay, so the profit
+--- holds craft after craft, not just while your bags last.
+local function answerProfit(prof)
+    local p = recordedProfessions()[prof]
+    local rank = professionSkill(prof)
+    if rank == false and not p then return say("You don't have " .. prof .. ". " .. trainerLink(prof)) end
+    rank = (rank ~= false and rank) or (p and p.rank)
+    local P = AskBot.Prices
+    if not (P and P.Available()) then return say("I need Auctionator's prices for that: install it and scan the AH.") end
+    local C = AskBot.Crafts
+    local entries, unpriced = {}, 0
+    local function add(name, item, made, reagents, colour, learn)
+        local sale, where = saleValue(item, made)
+        local cost, unknown = matsValue(reagents, {})
+        if not sale or unknown then unpriced = unpriced + 1; return end
+        if sale > cost then
+            entries[#entries + 1] = { name = name, item = item, made = made or 1, sale = sale, where = where, cost = cost,
+                profit = sale - cost, colour = colour, learn = learn, reagents = reagents }
+        end
+    end
+    local known = p and p.recipes or {}
+    if C and C.status == "ready" and C.byProf[prof] and rank then
+        local crafts = fittedCrafts(prof, p)
+        for _, c in ipairs(crafts) do
+            local name = C.Name(c)
+            local isKnown = name and known[D.NameKey(name)]
+            local colour = C.Colour(c, rank)
+            if c.item and (isKnown or (not c.recipe and colour ~= "unlearnable")) then
+                add(name or "?", c.item, c.made, c.reagents, colour, not isKnown and c or nil)
+            end
+        end
+    elseif p then
+        local COLOUR = { optimal = "orange", medium = "yellow", easy = "green", trivial = "grey" }
+        for _, r in pairs(p.recipes) do
+            if r.item then add(r.name, r.item, r.made, r.reagents, COLOUR[r.diff]) end
+        end
+    else
+        return say("Open your " .. prof .. " window once so I can read your recipes, then ask again.")
+    end
+    table.sort(entries, function(a, b)
+        if a.profit ~= b.profit then return a.profit > b.profit end
+        return a.name < b.name
+    end)
+    say(prof .. (rank and (" " .. rank) or "") .. ": most profitable crafts" .. GREY .. " (sale less the AH cut, mats bought)|r"
+        .. (#entries > 0 and ":" or "."))
+    if #entries == 0 then say("  Nothing sells for more than its mats cost right now.") end
+    local TAG = { orange = " |cffff8040(skill-up)|r", yellow = " |cffffff00(skill-up)|r" }
+    for i = 1, math.min(5, #entries) do
+        local e = entries[i]
+        local each = e.made > 1 and (" x" .. e.made) or ""
+        say("  " .. itemLinkText(e.item) .. each .. " |cff40ff40+" .. AskBot.Prices.Format(e.profit) .. "|r"
+            .. GREY .. " (sells " .. AskBot.Prices.Format(e.sale) .. (e.where == "vendor" and " to a vendor" or "")
+            .. ", mats " .. AskBot.Prices.Format(e.cost) .. ")|r" .. (TAG[e.colour] or "")
+            .. (e.learn and (" learn: " .. learnFrom(e.learn)) or "")
+            .. " " .. makeLink("list", function()
+                answerMats({ name = e.name, item = e.item, made = e.made, reagents = e.reagents }, prof, 1)
+            end))
+    end
+    if unpriced > 0 then
+        say(GREY .. "  " .. unpriced .. " more with no price for the item or a mat: scan the AH to include them.|r")
+    end
+end
+
 -- "mats for 3 linen bag", "what do I need to make Linen Bag", "recipe for X", "how do I level tailoring"
 local MATS_PATTERNS = { "^mats for (.+)$", "^materials for (.+)$", "^reagents for (.+)$", "^what do i need to make (.+)$",
     "^what does it take to make (.+)$", "^shopping list for (.+)$", "^how much to make (.+)$", "^cost to make (.+)$",
@@ -858,6 +934,19 @@ local SKILLUP_WORDS = { " leveling ", " levelling ", " level up ", " skill up ",
     " to level ", " i level " }
 local SKILLUP_FILLER = { cheapest = true, way = true, to = true, the = true, a = true, my = true, up = true,
     apprentice = true, journeyman = true, expert = true, artisan = true, master = true }
+
+-- "[Blacksmithing] for profit", "profit tailoring", "most profitable tailoring"
+local PROFIT_PATTERNS = { "^(.+) for profit$", "^(.+) for money$", "^profit (.+)$", "^profit from (.+)$",
+    "^(.+) profits?$", "^most profitable (.+)$", "^profitable (.+)$", "^(.+) to sell$", "^make money with (.+)$",
+    "^make money from (.+)$" }
+local function profitProfession(q)
+    for _, pattern in ipairs(PROFIT_PATTERNS) do
+        local s = q:match(pattern)
+        s = s and s:gsub("^what ", ""):gsub(" crafts?$", ""):gsub("^crafting ", "")
+        local prof = s and professionNamed(s)
+        if prof then return prof end
+    end
+end
 
 --- The profession a skill-up question names, or nil.
 local function skillUpProfession(q)
@@ -887,12 +976,14 @@ local function personalProfession(q)
     for _, pattern in ipairs(MATS_PATTERNS) do
         if q:match(pattern) then return true end
     end
-    if skillUpProfession(q) then return true end
+    if skillUpProfession(q) or profitProfession(q) then return true end
     return q == "what should i craft"
 end
 
 --- Answers profession questions; returns true if it did.
 local function professionQuestion(q, isServiceQuestion)
+    local forProfit = profitProfession(q)
+    if forProfit then answerProfit(forProfit); return true end
     -- Skill-ups need a profession named.
     local skillUp = skillUpProfession(q)
     if skillUp then answerSkillUp(skillUp); return true end
