@@ -1160,8 +1160,9 @@ ask("how do i level leatherworking", { "Leatherworking 35: cheapest skill-ups:",
 -- A profession trainer window: training costs join the ranking (Pants 50c beats Boots 5s).
 do
     local tsList = { { "Leatherworking", "header", true }, { "Handstitched Leather Boots", "available", 500 },
-        { "Handstitched Leather Pants", "available", 50 } }
+        { "Handstitched Leather Pants", "available", 50 }, { "Embossed Leather Boots", "unavailable", 300, 55 } }
     local saved = { IsTradeskillTrainer, GetNumTrainerServices, GetTrainerServiceInfo, GetTrainerServiceCost }
+    function GetTrainerServiceSkillReq(i) return "Leatherworking", tsList[i][4] or 0, true end
     function IsTradeskillTrainer() return true end
     function GetNumTrainerServices() return #tsList end
     function GetTrainerServiceInfo(i) return tsList[i][1], tsList[i][2] end
@@ -1169,6 +1170,10 @@ do
     fire("TRAINER_SHOW")
     advance(1)
     IsTradeskillTrainer, GetNumTrainerServices, GetTrainerServiceInfo, GetTrainerServiceCost = saved[1], saved[2], saved[3], saved[4]
+    GetTrainerServiceSkillReq = nil
+    if AskBotDB.recipeTrainingLevel[AskBot.Data.NameKey("Embossed Leather Boots")] ~= 55 then
+        failures = failures + 1; print("   !! FAIL: trainer skill level not recorded")
+    end
     ask("how do i level leatherworking", { "[Handstitched Leather Pants]|r |cffff8040orange|r - mats 10c+ learn: ",
         " 50c ", " 5s " })
     -- Orange only wins when it's no dearer per point: at 42 the Boots are yellow (93%) but free
@@ -1190,8 +1195,39 @@ do
     ahPrices[2302], ahAges[2302] = 2000, 0
     ask("leatherworking for profit", { "Leatherworking 35: most profitable crafts",
         "[Handstitched Leather Boots]|r |cff40ff40+16s 90c|r", "(sells 19s, mats 2s 10c)", "learn: " },
-        { "Fine Leather Boots" })
-    ahPrices[2302] = nil
+        { "Fine Leather Boots", "Open your Leatherworking trainer" })
+    -- Levelling with profit: sales come off each craft's cost, and the plan says what they bring.
+    ask("level leatherworking with profit", { "Leatherworking 35/75: cheapest skill-ups", "counting what you can sell them for",
+        "[Handstitched Leather Boots]|r |cffff8040orange|r - mats 2s, sells 19s |cff40ff40(+17s)|r",
+        "sell what you make for ~" }, { "for profit" })
+    ask("|cffffd000|Htrade:Player-1:2018:165|h[Leatherworking]|h|r skill ups profitably", "counting what you can sell them for")
+    ask("how do i level leatherworking", "Leatherworking 35/75: cheapest skill-ups", { "counting what", "sells 19s" })
+    -- Embossed Leather Boots with no recipe item and not on your trainer's list (Forever's
+    -- Sterling Silver Boots): left out of profit and skill-ups even when you could make them.
+    ahPrices[2309], ahAges[2309] = 9000, 0
+    local lw = skillLines[#skillLines]
+    lw[3] = 60
+    local embossed = AskBot.Data.NameKey("Embossed Leather Boots")
+    local embossedCost = AskBotDB.recipeTraining[embossed]
+    ask("leatherworking for profit", "[Embossed Leather Boots]")
+    AskBotDB.recipeTraining[embossed] = nil
+    ask("leatherworking for profit", "Handstitched Leather Boots", { "Embossed" })
+    ask("how do i level leatherworking", "Leatherworking 60/75: cheapest skill-ups", { "Embossed" })
+    AskBotDB.recipeTraining[embossed] = embossedCost
+    -- Before any trainer window: assumed taught, with a nudge to open the trainer.
+    local savedCosts = AskBotDB.recipeTraining
+    AskBotDB.recipeTraining = nil
+    ask("leatherworking for profit", { "Embossed Leather Boots", "Open your Leatherworking trainer once" })
+    AskBotDB.recipeTraining = savedCosts
+    -- Your trainer teaches Embossed at 30, not AtlasLoot's 55 (Forever's Heavy Grinding Stone:
+    -- 100, not 125): learnable at 35, orange with the colours moved down too.
+    lw[3] = 35
+    AskBotDB.recipeTrainingLevel[embossed] = 30
+    ask("leatherworking for profit", "[Embossed Leather Boots]|r |cff40ff40+79s 50c|r")
+    ask("how do i level leatherworking", "[Embossed Leather Boots]|r |cffff8040orange|r")
+    AskBotDB.recipeTrainingLevel[embossed] = 55
+    lw[3] = 35
+    ahPrices[2302], ahPrices[2309] = nil, nil
     -- More than the plan uses: the rest is worth selling (1s less the 5% cut each).
     bags[2318] = 200
     ask("how do i level leatherworking", { "Not needed, sell for ~27s 55c:", "29 |cffffffff[Light Leather]" }, { "Buy: 1" })

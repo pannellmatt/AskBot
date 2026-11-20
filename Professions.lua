@@ -476,7 +476,9 @@ local DIFF_LABEL = { optimal = "|cffff8040orange|r", medium = "|cffffff00yellow|
 
 --- How to level a profession.
 --- Profession trainer windows: what each recipe costs to train, account-wide (the same for
---- every character): AskBotDB.recipeTraining[NameKey(recipe)] = copper.
+--- every character): AskBotDB.recipeTraining[NameKey(recipe)] = copper, and the skill it
+--- needs: AskBotDB.recipeTrainingLevel[NameKey(recipe)] (Forever moved some: Heavy Grinding
+--- Stone is 100, Classic 125).
 --- What one craft's mats are worth (AH or vendor price, whether or not you have them),
 --- whether a needed mat has no price, and whether your bags and bank hold them all.
 -- The auction house's cut of a sale: 5% at the faction AHs (confirmed on Forever from an
@@ -543,7 +545,16 @@ end
 --- the ones whose numbers your window confirms.
 local function fittedCrafts(prof, p)
     local list, vouched = {}, {}
+    local levels = AskBotDB and AskBotDB.recipeTrainingLevel or {}
     for _, c in ipairs(AskBot.Crafts.byProf[prof]) do
+        -- Your trainer said what skill it needs: where it differs from AtlasLoot, move the
+        -- colours by the same amount (an estimate until your window shows the recipe).
+        local name = AskBot.Crafts.Name(c)
+        local lv = name and levels[D.NameKey(name)]
+        if lv and lv ~= c.learn then
+            local d = lv - c.learn
+            c = setmetatable({ learn = lv, yellow = c.yellow + d, green = c.green + d, grey = c.grey + d }, { __index = c })
+        end
         local f, ok = fitToWindow(c, p)
         list[#list + 1] = f
         if ok then vouched[f] = true end
@@ -551,13 +562,46 @@ local function fittedCrafts(prof, p)
     return list, vouched
 end
 
+--- What one craft's output sells for: the AH price less the cut, or a vendor's price if that's
+--- more. Returns copper (for all `made`) and "AH" / "vendor", or nil.
+local function saleValue(item, made)
+    local P = AskBot.Prices
+    if not (item and P) then return nil end
+    local ah = P.Available() and P.Auction(item)
+    local net = ah and math.floor(ah * (1 - AH_CUT)) or nil
+    local vendor = P.VendorSell and P.VendorSell(item)
+    if vendor and (not net or vendor > net) then return vendor * (made or 1), "vendor" end
+    if net then return net * (made or 1), "AH" end
+end
+
+--- Has a profession trainer window shown any of `prof`'s recipes? (Their costs are recorded.)
+local function trainerSeen(prof, trainCosts)
+    for _, c in ipairs(AskBot.Crafts.byProf[prof] or {}) do
+        local name = AskBot.Crafts.Name(c)
+        if name and trainCosts[D.NameKey(name)] then return true end
+    end
+    return false
+end
+
+--- Can a trainer teach craft `c`? Not if a recipe item teaches it. With no recipe item, AtlasLoot
+--- can't say (Forever's Sterling Silver Boots come from elsewhere), so once your trainer's window
+--- has been seen (`seen`), only what it listed counts; before that, assume a trainer does.
+local function trainerTeaches(c, trainCosts, seen)
+    if c.recipe then return false end
+    if not seen then return true end
+    local name = AskBot.Crafts.Name(c)
+    return name ~= nil and trainCosts[D.NameKey(name)] ~= nil
+end
+
 --- Plays out levelling from `rank` to `target`: each point goes to the craft with the cheapest
 --- expected cost per point (mats you hold at their sale value, the rest bought, training paid
 --- once), using up your stock as it goes. Orange and yellow crafts you know or a trainer teaches.
 --- Returns { steps = { { c, from, to, crafts } }, buy = { [id] = n }, cost, spare = { [id] = n },
 --- reached } or nil.
-local function planSkillUps(prof, rank, target, known, trainCosts, crafts)
+local function planSkillUps(prof, rank, target, known, trainCosts, crafts, withProfit)
     local C = AskBot.Crafts
+    local sales = 0
+    local function sale(c) return withProfit and saleValue(c.item, c.made) or 0 end
     local stock, startStock, buy, learned = {}, {}, {}, {}
     local function have(id)
         if stock[id] == nil then stock[id] = bagCount(id, true); startStock[id] = stock[id] end
@@ -571,23 +615,25 @@ local function planSkillUps(prof, rank, target, known, trainCosts, crafts)
         local name = C.Name(c)
         return name and trainCosts[D.NameKey(name)] or 0
     end
+    local seen = trainerSeen(prof, trainCosts)
     local steps, cost, skill = {}, 0, rank
     while skill < target do
         local best, bestCost
         for _, c in ipairs(crafts) do
             local colour = C.Colour(c, skill)
-            if (colour == "orange" or colour == "yellow") and (isKnown(c) or not c.recipe) then
+            if (colour == "orange" or colour == "yellow") and (isKnown(c) or trainerTeaches(c, trainCosts, seen)) then
                 for _, g in ipairs(c.reagents) do have(g.id) end
                 local mats, unknown = matsValue(c.reagents, stock)
                 if not unknown then
                     local train = (isKnown(c) or learned[c]) and 0 or trainCost(c)
-                    local perPoint = mats / craftChance(c, skill) + train / math.max(1, c.grey - skill)
+                    local perPoint = (mats - sale(c)) / craftChance(c, skill) + train / math.max(1, c.grey - skill)
                     if not bestCost or perPoint < bestCost then best, bestCost = c, perPoint end
                 end
             end
         end
         if not best then break end
         local crafts = 1 / craftChance(best, skill)
+        sales = sales + sale(best) * crafts
         if not learned[best] and not isKnown(best) then
             learned[best] = true
             cost = cost + trainCost(best)
@@ -612,7 +658,7 @@ local function planSkillUps(prof, rank, target, known, trainCosts, crafts)
         local left = math.floor(stock[id] + 0.001)
         if left > 0 and n > 0 then spare[id] = left end
     end
-    return { steps = steps, buy = buy, cost = cost, spare = spare, reached = skill }
+    return { steps = steps, buy = buy, cost = cost, spare = spare, reached = skill, sales = sales }
 end
 
 --- "Plan to 150: ~28 crafts, ~1g 20s to buy" + recipe ranges, what to buy, what's left to sell.
@@ -622,7 +668,10 @@ local function sayPlan(plan, target)
     for _, s in ipairs(plan.steps) do crafts = crafts + s.crafts end
     say("  " .. GOLD .. "Plan to " .. plan.reached .. "|r"
         .. (plan.reached < target and (GREY .. " (then nothing orange or yellow I can price)|r") or "")
-        .. ": ~" .. math.ceil(crafts - 0.001) .. " crafts, ~" .. AskBot.Prices.Format(math.floor(plan.cost)) .. " to buy")
+        .. ": ~" .. math.ceil(crafts - 0.001) .. " crafts, ~" .. AskBot.Prices.Format(math.floor(plan.cost)) .. " to buy"
+        .. (plan.sales > 0 and (", sell what you make for ~" .. AskBot.Prices.Format(math.floor(plan.sales))
+            .. (plan.sales >= plan.cost and (" |cff40ff40(+" .. AskBot.Prices.Format(math.floor(plan.sales - plan.cost)) .. ")|r")
+                or (GREY .. " (costs ~" .. AskBot.Prices.Format(math.floor(plan.cost - plan.sales)) .. ")|r"))) or ""))
     local parts = {}
     for i, s in ipairs(plan.steps) do
         if i > 4 then parts[#parts + 1] = GREY .. "+" .. (#plan.steps - 4) .. " more|r"; break end
@@ -669,11 +718,19 @@ local function recordTradeTraining()
     for i = 1, (GetNumTrainerServices() or 0) do
         local name, a, b = GetTrainerServiceInfo(i)
         local cost = GetTrainerServiceCost and GetTrainerServiceCost(i)
-        if name and a ~= "header" and b ~= "header" and type(cost) == "number" then costs[D.NameKey(name)] = cost end
+        if name and a ~= "header" and b ~= "header" and type(cost) == "number" then
+            costs[D.NameKey(name)] = cost
+            local level
+            if GetTrainerServiceSkillReq then level = select(2, GetTrainerServiceSkillReq(i)) end
+            if type(level) == "number" and level > 0 then
+                AskBotDB.recipeTrainingLevel = AskBotDB.recipeTrainingLevel or {}
+                AskBotDB.recipeTrainingLevel[D.NameKey(name)] = level
+            end
+        end
     end
 end
 
-local function answerSkillUp(prof)
+local function answerSkillUp(prof, withProfit)
     if prof == "Mining" or prof == "Herbalism" then return answerGatherBest(prof) end
     local rank = professionSkill(prof)
     if prof == "Skinning" then
@@ -744,11 +801,20 @@ local function answerSkillUp(prof)
         local trainCosts = AskBotDB and AskBotDB.recipeTraining or {}
         local list, nextAt = {}, nil
         local crafts, vouched = fittedCrafts(prof, p)
+        local seen = trainerSeen(prof, trainCosts)
         for _, c in ipairs(crafts) do
             local colour = C.Colour(c, rank)
+            local name = C.Name(c)
+            local isKnown = name and known[D.NameKey(name)]
+            -- Not known, no recipe item, and your trainer didn't list it: it comes from somewhere
+            -- AskBot can't tell you, so leave it out.
+            if not isKnown and not c.recipe and not trainerTeaches(c, trainCosts, seen) then
+                colour = nil
+            end
             if colour == "orange" or colour == "yellow" then
-                local name = C.Name(c)
                 local cost, unknown, inBags = matsValue(c.reagents)
+                -- "with profit": what the craft sells for comes off its cost.
+                local sale = withProfit and c.item and saleValue(c.item, c.made) or nil
                 local how = (name and known[D.NameKey(name)]) and 1 or (c.recipe and 3 or 2)
                 -- A trainer recipe you haven't learned: add what it costs to train (once a profession
                 -- trainer window has shown it), so it ranks fairly against the ones you know.
@@ -757,10 +823,10 @@ local function answerSkillUp(prof)
                 -- (grey - skill) / (grey - yellow); training is paid once, so spread it over the
                 -- points the recipe can give before it goes grey.
                 local chance = colour == "orange" and 1 or math.max(0.05, (c.grey - rank) / math.max(1, c.grey - c.yellow))
-                local perPoint = cost / chance + (train or 0) / math.max(1, c.grey - rank)
+                local perPoint = (cost - (sale or 0)) / chance + (train or 0) / math.max(1, c.grey - rank)
                 list[#list + 1] = { c = c, name = name or "?", colour = colour, how = how, cost = cost, unknown = unknown,
-                    train = train, chance = chance, perPoint = perPoint, inBags = inBags, vouched = vouched[c] }
-            elseif colour == "unlearnable" and not c.recipe and (not nextAt or c.learn < nextAt) then
+                    train = train, chance = chance, perPoint = perPoint, inBags = inBags, vouched = vouched[c], sale = sale }
+            elseif colour == "unlearnable" and trainerTeaches(c, trainCosts, seen) and (not nextAt or c.learn < nextAt) then
                 nextAt = c.learn
             end
         end
@@ -776,6 +842,7 @@ local function answerSkillUp(prof)
         end)
         local atCap = p and p.max and rank >= p.max
         say(prof .. " " .. rank .. (p and p.max and ("/" .. p.max) or "") .. ": cheapest skill-ups"
+            .. (withProfit and (GREY .. " (counting what you can sell them for)|r") or "")
             .. (atCap and (" |cffff8040(at your cap: train the next rank)|r " .. trainerLink(prof)) or "") .. ":")
         if #list == 0 then say(GREY .. "  Nothing orange or yellow at " .. rank .. ".|r") end
         local COLOUR = { orange = "|cffff8040orange|r", yellow = "|cffffff00yellow|r" }
@@ -783,6 +850,12 @@ local function answerSkillUp(prof)
             local e = list[i]
             local c = e.c
             local cost = matsLabel(e)
+            if e.sale then
+                local net = e.sale - e.cost
+                cost = cost .. ", sells " .. AskBot.Prices.Format(e.sale) .. " "
+                    .. (net >= 0 and ("|cff40ff40(+" .. AskBot.Prices.Format(net) .. ")|r")
+                        or (GREY .. "(-" .. AskBot.Prices.Format(-net) .. ")|r"))
+            end
             local how = e.how == 1 and GREY .. "(known)|r" or ("learn: " .. learnFrom(c)
                 .. (e.train and (e.train == 0 and " free" or (" " .. AskBot.Prices.Format(e.train))) or ""))
             -- Recipes your window hasn't shown use Classic's thresholds: an estimate ("~").
@@ -791,7 +864,7 @@ local function answerSkillUp(prof)
                 .. " " .. how .. " " .. makeLink("list", function() answerMats(craftAsRecipe(c), prof, 1) end))
         end
         if p and p.max and rank < p.max then
-            local plan = planSkillUps(prof, rank, p.max, known, trainCosts, crafts)
+            local plan = planSkillUps(prof, rank, p.max, known, trainCosts, crafts, withProfit)
             if plan then sayPlan(plan, p.max) end
         end
         if nextAt then say(GREY .. "  New trainer recipes at " .. nextAt .. ".|r " .. trainerLink(prof)) end
@@ -839,18 +912,6 @@ local function answerSkillUp(prof)
     end
 end
 
---- What one craft's output sells for: the AH price less the cut, or a vendor's price if that's
---- more. Returns copper (for all `made`) and "AH" / "vendor", or nil.
-local function saleValue(item, made)
-    local P = AskBot.Prices
-    if not (item and P) then return nil end
-    local ah = P.Available() and P.Auction(item)
-    local net = ah and math.floor(ah * (1 - AH_CUT)) or nil
-    local vendor = P.VendorSell and P.VendorSell(item)
-    if vendor and (not net or vendor > net) then return vendor * (made or 1), "vendor" end
-    if net then return net * (made or 1), "AH" end
-end
-
 --- "blacksmithing for profit": crafts you know (or a trainer teaches at your skill) whose output
 --- sells for more than its mats bought now. Mats are priced at what you'd pay, so the profit
 --- holds craft after craft, not just while your bags last.
@@ -873,13 +934,16 @@ local function answerProfit(prof)
         end
     end
     local known = p and p.recipes or {}
+    local trainCosts, seenTrainer
     if C and C.status == "ready" and C.byProf[prof] and rank then
         local crafts = fittedCrafts(prof, p)
+        trainCosts = AskBotDB and AskBotDB.recipeTraining or {}
+        seenTrainer = trainerSeen(prof, trainCosts)
         for _, c in ipairs(crafts) do
             local name = C.Name(c)
             local isKnown = name and known[D.NameKey(name)]
             local colour = C.Colour(c, rank)
-            if c.item and (isKnown or (not c.recipe and colour ~= "unlearnable")) then
+            if c.item and (isKnown or (trainerTeaches(c, trainCosts, seenTrainer) and colour ~= "unlearnable")) then
                 add(name or "?", c.item, c.made, c.reagents, colour, not isKnown and c or nil)
             end
         end
@@ -912,6 +976,9 @@ local function answerProfit(prof)
     end
     if unpriced > 0 then
         say(GREY .. "  " .. unpriced .. " more with no price for the item or a mat: scan the AH to include them.|r")
+    end
+    if trainCosts and not seenTrainer then
+        say(GREY .. "  Open your " .. prof .. " trainer once so I only suggest recipes it really teaches.|r " .. trainerLink(prof))
     end
 end
 
@@ -971,17 +1038,26 @@ local function skillUpProfession(q)
     if not others and padded:find(" cheapest ", 1, true) then return (professionNamed(q)) end
 end
 
+--- "level [Blacksmithing] with profit": the profession, for skill-ups that count what crafts sell for.
+local function withProfitProfession(q)
+    local base = q:gsub(" with profits?$", ""):gsub(" profitably$", ""):gsub(" and profit$", "")
+    if base == q then return nil end
+    return skillUpProfession(base) or professionNamed(base)
+end
+
 --- Is `q` a profession question that needs your own recipes or skills? (For "!ask".)
 local function personalProfession(q)
     for _, pattern in ipairs(MATS_PATTERNS) do
         if q:match(pattern) then return true end
     end
-    if skillUpProfession(q) or profitProfession(q) then return true end
+    if skillUpProfession(q) or profitProfession(q) or withProfitProfession(q) then return true end
     return q == "what should i craft"
 end
 
 --- Answers profession questions; returns true if it did.
 local function professionQuestion(q, isServiceQuestion)
+    local withProfit = withProfitProfession(q)
+    if withProfit then answerSkillUp(withProfit, true); return true end
     local forProfit = profitProfession(q)
     if forProfit then answerProfit(forProfit); return true end
     -- Skill-ups need a profession named.
