@@ -1108,7 +1108,7 @@ ask("mats for 2 linen bag", { "[Linen Bag]|r x2 (Tailoring):", "  6 |cffffffff[B
     "sells for 50s each, so crafting saves 37s 70c each" })
 ask("what do i need to make brown linen pants", { "Brown Linen Pants", "have 1, buy 1" })
 ask("how do i level tailoring", { "Tailoring 75/75: cheapest skill-ups", "at your cap", "[Tailoring trainer]",
-    "Brown Linen Pants]|r |cffff8040orange|r - mats 8s 10c", "Linen Bag]|r |cffffff00yellow|r - mats 12s 30c", "[list]" },
+    "Brown Linen Pants]|r |cffff8040orange|r - mats 7s 90c", "Linen Bag]|r |cffffff00yellow|r - mats 12s 10c", "[list]" },
     { "Bolt of Linen Cloth]|r |c" })
 -- A profession link with words around it ("cheapest leveling [Blacksmithing (Apprentice)]")
 ask("cheapest leveling |cffffd000|Htrade:Player-1:2018:164|h[Tailoring (Apprentice)]|h|r", "Tailoring 75/75: cheapest skill-ups",
@@ -1173,6 +1173,16 @@ do
         "[Handstitched Leather Boots]|r |cffffff00yellow|r", " 93%|r - mats 10c+ learn: ", " free ",
         "[Handstitched Leather Pants]|r |cffff8040orange|r - mats 10c+ learn: ", " 50s " })
     lw[3] = 35
+    -- A plan to your cap: priced Light Leather (1s on the AH), 40 in your bags.
+    ahPrices[2318], ahAges[2318] = 100, 0
+    bags[2318] = 40
+    AskBotCharDB.professions.Leatherworking = { rank = 35, max = 75, recipes = {} }
+    ask("how do i level leatherworking", { "Plan to 75", " crafts, ~", "Buy: " })
+    -- More than the plan uses: the rest is worth selling (1s less the 5% cut each).
+    bags[2318] = 200
+    ask("how do i level leatherworking", { "Not needed, sell for ~27s 55c:", "29 |cffffffff[Light Leather]" }, { "Buy: 1" })
+    AskBotCharDB.professions.Leatherworking = nil
+    bags[2318] = nil
 end
 ask("recipe for fine leather boots", { "[Fine Leather Boots]|r (Leatherworking 90): learn it from",
     "Pattern: Fine Leather Boots", "Thread Seller" })

@@ -479,15 +479,143 @@ local DIFF_LABEL = { optimal = "|cffff8040orange|r", medium = "|cffffff00yellow|
 --- every character): AskBotDB.recipeTraining[NameKey(recipe)] = copper.
 --- What one craft's mats are worth (AH or vendor price, whether or not you have them),
 --- whether a needed mat has no price, and whether your bags and bank hold them all.
-local function matsValue(reagents)
+-- The auction house's cut of a sale: 5% at the faction AHs (confirmed on Forever from an
+-- "Auction successful" mail: 3x 1s 47c sold, 22c cut).
+local AH_CUT = 0.05
+
+--- What a mat you already hold is worth to you: what you'd get selling it on the AH (after the
+--- cut), or what it costs from a vendor (you'd only buy it again). nil if neither is known.
+local function holdValue(id)
+    local price, source = reagentPrice(id)
+    if source == "AH" then return math.floor(price * (1 - AH_CUT)) end
+    return price
+end
+
+--- One craft's mats: ones you hold at holdValue, the rest at the buy price. `stock` (item id ->
+--- count) overrides your bags and bank. Returns cost, unknown (a mat to buy has no price), inBags.
+local function matsValue(reagents, stock)
     local cost, unknown, inBags = 0, false, true
     for _, g in ipairs(reagents) do
-        local price = reagentPrice(g.id)
-        local short = g.count - bagCount(g.id, true) > 0
-        if short then inBags = false end
-        if price then cost = cost + price * g.count elseif short then unknown = true end
+        local have = stock and (stock[g.id] or 0) or bagCount(g.id, true)
+        local held, buy = math.min(have, g.count), math.max(0, g.count - have)
+        if buy > 0 then inBags = false end
+        local price, hv = reagentPrice(g.id), holdValue(g.id)
+        if held > 0 and hv then cost = cost + hv * held end
+        if buy > 0 then
+            if price then cost = cost + price * buy else unknown = true end
+        end
     end
     return cost, unknown, inBags
+end
+
+--- Skill-up chance of one craft at `skill`: 1 for orange, (grey - skill) / (grey - yellow) after.
+local function craftChance(c, skill)
+    if skill < c.yellow then return 1 end
+    return math.max(0.05, (c.grey - skill) / math.max(1, c.grey - c.yellow))
+end
+
+--- Plays out levelling from `rank` to `target`: each point goes to the craft with the cheapest
+--- expected cost per point (mats you hold at their sale value, the rest bought, training paid
+--- once), using up your stock as it goes. Orange and yellow crafts you know or a trainer teaches.
+--- Returns { steps = { { c, from, to, crafts } }, buy = { [id] = n }, cost, spare = { [id] = n },
+--- reached } or nil.
+local function planSkillUps(prof, rank, target, known, trainCosts)
+    local C = AskBot.Crafts
+    local stock, startStock, buy, learned = {}, {}, {}, {}
+    local function have(id)
+        if stock[id] == nil then stock[id] = bagCount(id, true); startStock[id] = stock[id] end
+        return stock[id]
+    end
+    local function isKnown(c)
+        local name = C.Name(c)
+        return name and known[D.NameKey(name)]
+    end
+    local function trainCost(c)
+        local name = C.Name(c)
+        return name and trainCosts[D.NameKey(name)] or 0
+    end
+    local steps, cost, skill = {}, 0, rank
+    while skill < target do
+        local best, bestCost
+        for _, c in ipairs(C.byProf[prof]) do
+            local colour = C.Colour(c, skill)
+            if (colour == "orange" or colour == "yellow") and (isKnown(c) or not c.recipe) then
+                for _, g in ipairs(c.reagents) do have(g.id) end
+                local mats, unknown = matsValue(c.reagents, stock)
+                if not unknown then
+                    local train = (isKnown(c) or learned[c]) and 0 or trainCost(c)
+                    local perPoint = mats / craftChance(c, skill) + train / math.max(1, c.grey - skill)
+                    if not bestCost or perPoint < bestCost then best, bestCost = c, perPoint end
+                end
+            end
+        end
+        if not best then break end
+        local crafts = 1 / craftChance(best, skill)
+        if not learned[best] and not isKnown(best) then
+            learned[best] = true
+            cost = cost + trainCost(best)
+        end
+        for _, g in ipairs(best.reagents) do
+            local need = g.count * crafts
+            local fromStock = math.min(have(g.id), need)
+            stock[g.id] = stock[g.id] - fromStock
+            if need > fromStock then
+                buy[g.id] = (buy[g.id] or 0) + need - fromStock
+                cost = cost + (reagentPrice(g.id) or 0) * (need - fromStock)
+            end
+        end
+        local last = steps[#steps]
+        if last and last.c == best then last.to, last.crafts = skill + 1, last.crafts + crafts
+        else steps[#steps + 1] = { c = best, from = skill, to = skill + 1, crafts = crafts } end
+        skill = skill + 1
+    end
+    if #steps == 0 then return nil end
+    local spare = {}
+    for id, n in pairs(startStock) do
+        local left = math.floor(stock[id] + 0.001)
+        if left > 0 and n > 0 then spare[id] = left end
+    end
+    return { steps = steps, buy = buy, cost = cost, spare = spare, reached = skill }
+end
+
+--- "Plan to 150: ~28 crafts, ~1g 20s to buy" + recipe ranges, what to buy, what's left to sell.
+local function sayPlan(plan, target)
+    local C = AskBot.Crafts
+    local crafts = 0
+    for _, s in ipairs(plan.steps) do crafts = crafts + s.crafts end
+    say("  " .. GOLD .. "Plan to " .. plan.reached .. "|r"
+        .. (plan.reached < target and (GREY .. " (then nothing orange or yellow I can price)|r") or "")
+        .. ": ~" .. math.ceil(crafts - 0.001) .. " crafts, ~" .. AskBot.Prices.Format(math.floor(plan.cost)) .. " to buy")
+    local parts = {}
+    for i, s in ipairs(plan.steps) do
+        if i > 4 then parts[#parts + 1] = GREY .. "+" .. (#plan.steps - 4) .. " more|r"; break end
+        local name = C.Name(s.c) or "?"
+        parts[#parts + 1] = s.from .. "-" .. s.to .. " " .. (s.c.item and itemLinkText(s.c.item) or (GOLD .. name .. "|r"))
+            .. " x" .. math.ceil(s.crafts - 0.001)
+    end
+    say("    " .. table.concat(parts, ", "))
+    local list = {}
+    for id, n in pairs(plan.buy) do list[#list + 1] = { id = id, n = math.ceil(n - 0.001) } end
+    table.sort(list, function(a, b) return a.id < b.id end)
+    if #list > 0 then
+        local p = {}
+        for _, e in ipairs(list) do p[#p + 1] = e.n .. " " .. itemLinkText(e.id) end
+        say("    Buy: " .. table.concat(p, ", "))
+    end
+    local spare, value = {}, 0
+    for id, n in pairs(plan.spare) do
+        local price, source = reagentPrice(id)
+        if source == "AH" then
+            spare[#spare + 1] = { id = id, n = n }
+            value = value + math.floor(price * (1 - AH_CUT)) * n
+        end
+    end
+    table.sort(spare, function(a, b) return a.id < b.id end)
+    if #spare > 0 then
+        local p = {}
+        for _, e in ipairs(spare) do p[#p + 1] = e.n .. " " .. itemLinkText(e.id) end
+        say("    " .. GREY .. "Not needed, sell for ~" .. AskBot.Prices.Format(value) .. ":|r " .. table.concat(p, ", "))
+    end
 end
 
 --- "mats 1s 20c (in bags)", "mats 10c+", "mats ?"
@@ -622,6 +750,10 @@ local function answerSkillUp(prof)
             local odds = e.colour == "yellow" and (GREY .. " " .. math.floor(e.chance * 100 + 0.5) .. "%|r") or ""
             say("  " .. (c.item and itemLinkText(c.item) or (GOLD .. e.name .. "|r")) .. " " .. COLOUR[e.colour] .. odds .. " - " .. cost
                 .. " " .. how .. " " .. makeLink("list", function() answerMats(craftAsRecipe(c), prof, 1) end))
+        end
+        if p and p.max and rank < p.max then
+            local plan = planSkillUps(prof, rank, p.max, known, trainCosts)
+            if plan then sayPlan(plan, p.max) end
         end
         if nextAt then say(GREY .. "  New trainer recipes at " .. nextAt .. ".|r " .. trainerLink(prof)) end
         return
