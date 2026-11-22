@@ -80,7 +80,7 @@ Vendors that sell it, mobs and objects that drop it, quests that reward it, and 
 ### Gear upgrades
 AskBot compares what you're wearing with gear you can get soon: rewards from quests in your log or that you can take within two levels, dungeon drops near your level *(with AtlasLoot)*, and gear on the auction house *(with Auctionator)*. It shows the best upgrade for each slot and where to get it.
 
-- `/ab upgrades` (or `what gear should I get`, `better weapon`, `upgrades legs`)
+- `/ab upgrades` (or `what gear should I get`, `better weapon`, `upgrades legs`, `upgrade daggers`: a weapon type such as daggers, swords, axes, maces, staves, bows or wands)
 - `/ab what boss drops are good for me` (or `upgrades from dungeons`, `upgrades from quests`, `AH upgrades`): one kind of source only. The dungeon version also ranks dungeons by how many upgrades they hold.
 - **Your spec** comes from your talents. Before you've spent any (or when two trees are close), AskBot uses a common levelling spec and says so, e.g. *for Warrior (no talents yet, scored as Arms)*. Name a spec to override it: `/ab upgrades as tank`, `I'm a feral druid, what gear should I go for`.
 - **Not usable yet?** Items you'll be able to use within two levels are still listed, marked e.g. *(at 26)*, *(Plate Mail at 40)* or *(train Two-Handed Axes)* with a link to the nearest weapon master.

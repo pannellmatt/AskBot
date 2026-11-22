@@ -983,6 +983,9 @@ ask("what boss drops are good for me?", { "Upgrades from dungeons for Arms Warri
 ask("upgrades from quests", { "Upgrades from quests for", "Militia Leggings" }, { "Rockslicer", "Silver Ring" })
 ask("what does vancleef drop", "Edwin VanCleef", { "Upgrades" })
 ask("better weapon", { "Two-hander: ", "Rockslicer" }, { "Militia" })
+-- A weapon type: Rockslicer is an axe, not a dagger.
+ask("upgrade axes", { "(axes)", "Rockslicer" }, { "Militia" })
+ask("upgrade daggers", { "Upgrades for Arms Warrior (daggers)", "Nothing better" }, { "Rockslicer" })
 ask("upgrades as tank", { "Upgrades for Protection Warrior" }, { "Guessing" })
 talents = { 0, 0, 0 }
 ask("what gear should i get", { "Upgrades for Arms Warrior", "Guessing Arms (no talent points spent yet)",

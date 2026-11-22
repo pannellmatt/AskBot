@@ -109,11 +109,30 @@ local function answerUpgrades(slots, words)
     for _, id in ipairs(doableQuests(level + G.LEVEL_AHEAD)) do quests[#quests + 1] = id end
     local only = gearSourceFilter(words)
     local candidates = G.Candidates({ classFile = classFile, level = level, quests = quests, inLog = inLog, only = only })
+    -- "upgrade daggers": only those weapon types (by weapon subclass).
+    local types, typeLabels = nil, {}
+    for word in pairs(words) do
+        local t = G.WEAPON_TYPES[word]
+        if t and not typeLabels[t[1]] then
+            types = types or {}
+            for _, sub in ipairs(t[2]) do types[sub] = true end
+            typeLabels[t[1]] = true
+            typeLabels[#typeLabels + 1] = t[1]
+        end
+    end
     if #slots > 0 then
         local wanted = {}
         for _, g in ipairs(slots) do wanted[g] = true end
+        local getInstant = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
         local kept = {}
-        for _, c in ipairs(candidates) do if wanted[c.group] then kept[#kept + 1] = c end end
+        for _, c in ipairs(candidates) do
+            local ok = wanted[c.group]
+            if ok and types then
+                local sub = getInstant and select(7, getInstant(c.id))
+                ok = sub ~= nil and types[sub] or false
+            end
+            if ok then kept[#kept + 1] = c end
+        end
         candidates = kept
     end
 
@@ -144,7 +163,8 @@ local function answerUpgrades(slots, words)
         end
 
         local FROM = { boss = " from dungeons", quest = " from quests", ah = " on the auction house" }
-        local where = #slots > 0 and (" (" .. G.GROUP_LABELS[slots[1]]:lower() .. ")") or ""
+        local where = types and (" (" .. table.concat(typeLabels, ", ") .. ")")
+            or (#slots > 0 and (" (" .. G.GROUP_LABELS[slots[1]]:lower() .. ")") or "")
         say((only and "Upgrades" .. FROM[only] or "Upgrades") .. " for " .. spec.name .. " " .. className .. where
             .. ", level " .. level .. ":")
         if #shown == 0 then

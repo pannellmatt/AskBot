@@ -184,6 +184,21 @@ Gear.SLOT_WORDS = {
     offhand = { "offhand" }, shield = { "offhand" }, ranged = { "ranged" }, bow = { "ranged" }, gun = { "ranged" },
     wand = { "ranged" },
 }
+-- Weapon types in a question ("upgrade daggers") -> { label, weapon subclass ids, slot groups }.
+local ONE, TWO, BOTH, RANGED = { "onehand" }, { "twohand" }, { "onehand", "twohand" }, { "ranged" }
+local WEAPON_TYPES = {
+    dagger = { "daggers", { 15 }, ONE }, sword = { "swords", { 7, 8 }, BOTH }, axe = { "axes", { 0, 1 }, BOTH },
+    mace = { "maces", { 4, 5 }, BOTH }, staff = { "staves", { 10 }, TWO }, polearm = { "polearms", { 6 }, TWO },
+    fist = { "fist weapons", { 13 }, ONE }, bow = { "bows", { 2 }, RANGED }, gun = { "guns", { 3 }, RANGED },
+    crossbow = { "crossbows", { 18 }, RANGED }, thrown = { "thrown weapons", { 16 }, RANGED }, wand = { "wands", { 19 }, RANGED },
+}
+for _, w in ipairs({ "dagger", "sword", "axe", "mace", "polearm", "bow", "gun", "crossbow", "wand" }) do
+    WEAPON_TYPES[w .. "s"] = WEAPON_TYPES[w]
+end
+WEAPON_TYPES.staves, WEAPON_TYPES.knife, WEAPON_TYPES.knives = WEAPON_TYPES.staff, WEAPON_TYPES.dagger, WEAPON_TYPES.dagger
+WEAPON_TYPES.fists, WEAPON_TYPES.throwing = WEAPON_TYPES.fist, WEAPON_TYPES.thrown
+for word, t in pairs(WEAPON_TYPES) do Gear.SLOT_WORDS[word] = t[3] end
+Gear.WEAPON_TYPES = WEAPON_TYPES
 
 local function itemInfoInstant(id)
     local f = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
