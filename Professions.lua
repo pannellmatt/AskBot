@@ -340,16 +340,17 @@ local function reagentPrice(id)
 end
 
 --- Mats for `count` crafts: lines with what you have and what to buy, and the cost.
-local function answerMats(recipe, prof, count)
+local function answerMats(recipe, prof, count, ignoreHeld)
     count = math.max(1, count or 1)
     local made = recipe.made or 1
     local itemText = recipe.item and itemLinkText(recipe.item) or (GOLD .. recipe.name .. "|r")
     say(itemText .. (count > 1 and (" x" .. count) or "") .. " (" .. prof .. "):"
-        .. (made > 1 and (GREY .. " makes " .. made * count .. "|r") or ""))
+        .. (made > 1 and (GREY .. " makes " .. made * count .. "|r") or "")
+        .. (ignoreHeld and (GREY .. " buying everything|r") or ""))
     local total, unknown, haveAll = 0, false, true
     for _, r in ipairs(recipe.reagents) do
         local need = r.count * count
-        local have = bagCount(r.id, true)
+        local have = ignoreHeld and 0 or bagCount(r.id, true)
         local buy = math.max(0, need - have)
         local name = r.id and itemLinkText(r.id) or r.name or "?"
         local line = "  " .. need .. " " .. name .. ": "
@@ -424,14 +425,28 @@ local function answerRecipe(name)
     end
     local c = craftFor(name)
     if c then
-        local what = (c.item and itemLinkText(c.item) or (GOLD .. (AskBot.Crafts.Name(c) or name) .. "|r"))
-            .. " (" .. c.prof .. " " .. c.learn .. ")"
+        -- The skill it needs: your trainer's figure when it's seen it (Forever moved some), else
+        -- AtlasLoot's. Then how far you are from it.
+        local cName = AskBot.Crafts.Name(c)
+        local levels = AskBotDB and AskBotDB.recipeTrainingLevel or {}
+        local learn = (cName and levels[D.NameKey(cName)]) or c.learn
+        local what = (c.item and itemLinkText(c.item) or (GOLD .. (cName or name) .. "|r"))
+            .. " (" .. c.prof .. " " .. learn .. ")"
         local mats = makeLink("mats", function() answerMats(craftAsRecipe(c), c.prof, 1) end)
+        local rank = not AskBot.asker and professionSkill(c.prof)
+        if not AskBot.asker and rank == nil then
+            local p = recordedProfessions()[c.prof]
+            rank = p and p.rank
+        end
+        local gap = ""
+        if rank == false then gap = " You don't have " .. c.prof .. "."
+        elseif rank and rank >= learn then gap = " |cff40ff40You can learn it now (" .. rank .. ").|r"
+        elseif rank then gap = " You're at " .. rank .. ": " .. (learn - rank) .. " to go." end
         if c.recipe then
-            say(what .. ": learn it from " .. itemLinkText(c.recipe) .. ". " .. mats)
+            say(what .. ": learn it from " .. itemLinkText(c.recipe) .. "." .. gap .. " " .. mats)
             answerItem(nil, "get", { { nil, c.recipe, itemName(c.recipe) } })
         else
-            say(what .. ": taught by trainers. " .. trainerLink(c.prof) .. " " .. mats)
+            say(what .. ": taught by trainers." .. gap .. " " .. trainerLink(c.prof) .. " " .. mats)
         end
         return
     end
@@ -986,12 +1001,17 @@ end
 local MATS_PATTERNS = { "^mats for (.+)$", "^materials for (.+)$", "^reagents for (.+)$", "^what do i need to make (.+)$",
     "^what does it take to make (.+)$", "^shopping list for (.+)$", "^how much to make (.+)$", "^cost to make (.+)$",
     "^cost of making (.+)$", "^(.+) mats$", "^(.+) materials$", "^how do i make (.+)$", "^how to make (.+)$",
-    "^can i make (.+)$" }
+    "^can i make (.+)$", "^cost to craft (.+)$", "^cost of crafting (.+)$", "^how much to craft (.+)$",
+    "^what does it cost to make (.+)$", "^what does it cost to craft (.+)$", "^how much does it cost to make (.+)$",
+    "^how much does it cost to craft (.+)$", "^price to make (.+)$", "^price to craft (.+)$", "^craft cost (.+)$",
+    "^crafting cost (.+)$", "^(.+) craft cost$", "^(.+) crafting cost$", "^mats to make (.+)$", "^mats to craft (.+)$" }
 local RECIPE_PATTERNS = { "^recipe for (.+)$", "^pattern for (.+)$", "^plans for (.+)$", "^formula for (.+)$",
     "^schematic for (.+)$", "^where do i get the recipe for (.+)$", "^where do i get the pattern for (.+)$",
     "^where do i get the plans for (.+)$", "^where do i get the formula for (.+)$", "^where do i get the schematic for (.+)$",
     "^where can i get the recipe for (.+)$", "^where can i learn (.+)$", "^how do i learn (.+)$", "^where do i learn (.+)$",
-    "^who teaches (.+)$", "^where is the recipe for (.+)$" }
+    "^who teaches (.+)$", "^where is the recipe for (.+)$", "^when can i learn (.+)$", "^when do i learn (.+)$",
+    "^when can i make (.+)$", "^when can i craft (.+)$", "^what skill for (.+)$", "^what skill do i need for (.+)$",
+    "^what level can i learn (.+)$", "^what skill to make (.+)$", "^what skill to learn (.+)$" }
 local SKILLUP_PATTERNS = { "^how do i level (.+)$", "^how to level (.+)$", "^how should i level (.+)$", "^level up (.+)$",
     "^levelling (.+)$", "^leveling (.+)$", "^skill up (.+)$", "^(.+) skill ?ups?$", "^(.+) skill up plan$", "^plan (.+)$", "^(.+) plan$", "^plan for (.+)$",
     "^(.+) levelling$", "^(.+) leveling$", "^(.+) guide$", "^best (.+) skill ?ups$", "^what (.+) should i craft$",
@@ -1046,7 +1066,19 @@ local function withProfitProfession(q)
 end
 
 --- Is `q` a profession question that needs your own recipes or skills? (For "!ask".)
+-- "... from scratch": price every mat as bought, ignoring what you hold.
+local IGNORE_HELD = { " from scratch", " ignoring bags", " ignoring my bags", " ignore bags", " ignore my bags",
+    " buying everything", " buying all", " buying all mats", " without my mats", " ignoring what i have",
+    " ignoring what i hold", " ignore what i have", " ignore what i hold", " fresh" }
+local function stripIgnoreHeld(q)
+    for _, w in ipairs(IGNORE_HELD) do
+        if q:sub(-#w) == w then return q:sub(1, -#w - 1), true end
+    end
+    return q, false
+end
+
 local function personalProfession(q)
+    q = stripIgnoreHeld(q)
     for _, pattern in ipairs(MATS_PATTERNS) do
         if q:match(pattern) then return true end
     end
@@ -1072,17 +1104,18 @@ local function professionQuestion(q, isServiceQuestion)
         if not any then say("Open a profession window once so I can read your recipes, then ask again.") end
         return true
     end
+    local matsQ, ignoreHeld = stripIgnoreHeld(q)
     for _, pattern in ipairs(MATS_PATTERNS) do
-        local s = q:match(pattern)
+        local s = matsQ:match(pattern)
         if s and not professionNamed(s) then
             local count = tonumber(s:match("^(%d+) ")) or tonumber(s:match(" x ?(%d+)$")) or tonumber(s:match(" (%d+)$"))
             s = s:gsub("^%d+ ", ""):gsub(" x ?%d+$", ""):gsub(" %d+$", ""):gsub("^an? ", ""):gsub("^the ", "")
             local recipe, prof
             if not AskBot.asker then recipe, prof = knownRecipe(s) end
-            if recipe then answerMats(recipe, prof, count); return true end
+            if recipe then answerMats(recipe, prof, count, ignoreHeld); return true end
             local c = craftFor(s)
             if c then
-                answerMats(craftAsRecipe(c), c.prof, count)
+                answerMats(craftAsRecipe(c), c.prof, count, ignoreHeld)
                 if not AskBot.asker then
                     say(GREY .. "  You don't know it yet (" .. c.prof .. " " .. c.learn .. "), learn: |r" .. learnFrom(c))
                 end
@@ -1098,6 +1131,12 @@ local function professionQuestion(q, isServiceQuestion)
                 end
                 say("You don't know how to make that yet.")
                 answerRecipe(s)
+                return true
+            end
+            -- Just after a /reload AtlasLoot's recipes (the ones you don't know) are still loading.
+            local C = AskBot.Crafts
+            if C and C.status == "loading" then
+                say("Still reading AtlasLoot's recipes, ask again in a few seconds.")
                 return true
             end
             if pattern ~= "^how do i make (.+)$" and pattern ~= "^how to make (.+)$" and pattern ~= "^can i make (.+)$" then

@@ -1107,6 +1107,12 @@ ask("mats for 2 linen bag", { "[Linen Bag]|r x2 (Tailoring):", "  6 |cffffffff[B
     "(AH 4s each)", "  6 |cffffffff[Coarse Thread]|r: buy 6", "(vendor 10c each)", "To buy: 20s 60c",
     "sells for 50s each, so crafting saves 37s 70c each" })
 ask("what do i need to make brown linen pants", { "Brown Linen Pants", "have 1, buy 1" })
+ask("cost to craft " .. il(4238), { "[Linen Bag]|r", "To buy: ", "sells for 50s each" })
+ask("how much does it cost to craft linen bag", { "[Linen Bag]|r", "To buy: " })
+-- "from scratch": the bolt in your bags is bought too (3 x 4s + 3 x 10c).
+ask("cost to craft " .. il(4238) .. " from scratch", { "buying everything", "[Bolt of Linen Cloth]|r: buy 3", "To buy: 12s 30c" },
+    { "have 1" })
+ask("mats for 2 linen bag ignoring bags", { "[Linen Bag]|r x2 (Tailoring):", "buy 6", "To buy: 24s 60c" })
 ask("how do i level tailoring", { "Tailoring 75/75: cheapest skill-ups", "at your cap", "[Tailoring trainer]",
     "Brown Linen Pants]|r |cffff8040orange|r - mats 7s 90c", "Linen Bag]|r |cffffff00yellow|r - mats 12s 10c", "[list]" },
     { "Bolt of Linen Cloth]|r |c" })
@@ -1244,9 +1250,19 @@ do
 end
 ask("recipe for fine leather boots", { "[Fine Leather Boots]|r (Leatherworking 90): learn it from",
     "Pattern: Fine Leather Boots", "Thread Seller" })
-ask("how do i learn handstitched leather pants", "(Leatherworking 30): taught by trainers.")
+ask("how do i learn handstitched leather pants", "(Leatherworking 30): taught by trainers. |cff40ff40You can learn it now (35).")
+-- "when can I learn [item]": the skill it needs and how far you are.
+ask("when can i learn " .. il(2309), { "[Embossed Leather Boots]|r (Leatherworking 55): taught by trainers. You're at 35: 20 to go.",
+    "[Leatherworking trainer]" })
+ask("when can i learn fine leather boots", { "(Leatherworking 90): learn it from", "You're at 35: 55 to go." })
 ask("mats for 2 fine leather boots", { "[Fine Leather Boots]|r x2 (Leatherworking):", "10 |cffffffff[Light Leather]|r: buy 10",
     "You don't know it yet (Leatherworking 90), learn: " })
+ask("cost to craft " .. il(2307) .. " from scratch", { "[Fine Leather Boots]|r (Leatherworking):", "buying everything",
+    "You don't know it yet" })
+-- Straight after a /reload, AtlasLoot's recipes are still loading: say so, not "none of your recipes".
+AskBot.Crafts.status = "loading"
+ask("cost to craft " .. il(2309) .. " from scratch", "Still reading AtlasLoot's recipes", { "None of your recipes" })
+AskBot.Crafts.status = "ready"
 table.remove(skillLines)
 
 -- Beasts you meet: the game says "Coyote" isn't one here, and "Grey Thing" is
