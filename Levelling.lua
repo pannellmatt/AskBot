@@ -1360,6 +1360,44 @@ local function reagentQuestsQuestion(q)
     return (w.reagent or w.reagents or w.ah or w.auction or w.buyable or (w.buy and w.quests)) and true or false
 end
 
+--- One list of what to buy for the first n quests: counts added up per item, what you hold
+--- taken off once, priced each and in total.
+local function sayShoppingList(rows, n)
+    local P = AskBot.Prices
+    local items, order = {}, {}
+    for i = 1, n do
+        for _, e in ipairs(rows[i].list) do
+            local t = items[e.id]
+            if not t then
+                t = { name = e.name, count = 0, have = e.have, price = e.price, from = e.from }
+                items[e.id] = t
+                order[#order + 1] = e.id
+            end
+            t.count = t.count + e.count
+        end
+    end
+    local lines, total = {}, 0
+    for _, itemId in ipairs(order) do
+        local t = items[itemId]
+        local need = math.max(0, t.count - t.have)
+        if need > 0 then
+            local have = t.have > 0 and (GREY .. " (have " .. t.have .. ")|r") or ""
+            if t.price then
+                lines[#lines + 1] = need .. " " .. t.name .. have .. " x " .. P.Format(t.price)
+                    .. (t.from == "vendor" and (GREY .. " (vendor)|r") or "") .. " = " .. P.Format(t.price * need)
+                if total then total = total + t.price * need end
+            else
+                lines[#lines + 1] = need .. " " .. t.name .. have .. GREY .. " (no price)|r"
+                total = nil
+            end
+        end
+    end
+    local these = n == 1 and "this quest" or ("these " .. n)
+    if #lines == 0 then return say("You already have everything for " .. these .. ".") end
+    say("To buy for " .. these .. (total and (", ~" .. P.Format(total) .. " in all") or "") .. ":")
+    for _, l in ipairs(lines) do say("  " .. l) end
+end
+
 --- Quests you can take (or have) that only want reagents from the AH, best XP per gold first.
 local function answerReagentQuests()
     local P = AskBot.Prices
@@ -1398,6 +1436,7 @@ local function answerReagentQuests()
             .. (r.inLog and (GREY .. " [in log]|r") or "") .. ": " .. shoppingText(r.list) .. cost .. where)
         first = first or giver or turnIn
     end
+    sayShoppingList(rows, math.min(6, #rows))
     if not P.Available() then say(GREY .. "  Install Auctionator for prices.|r") end
     if first then autoPin(first.place, first.spawn, "quest") end
 end

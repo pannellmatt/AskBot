@@ -698,7 +698,9 @@ ask("kill and loot quests", { "Kill and loot quests to pick up in Westfall", "Go
 ask("what reagent quests are in my level range", { "Quests you can finish with AH reagents (1)",
     "Westfall Stew", "6 Linen Cloth ~54s", "hand in |cffffd100Gryan Stoutmantle" },
     { "Red Linen Goods", "Goretusk Liver Pie", "Bounty on Murlocs" })
+ask("ah quests", { "To buy for this quest, ~54s in all:", "6 Linen Cloth x 9s = 54s" })
 bags[2589] = 2
+ask("ah quests", { "To buy for this quest, ~36s in all:", "4 Linen Cloth|cffaaaaaa (have 2)|r x 9s = 36s" })
 ask("cost to complete westfall stew", { "Westfall Stew", "4 Linen Cloth", "(have 2)", "x 9s = 36s",
     "Hand in: |cffffd100Gryan Stoutmantle" })
 ask("|cffffff00|Hquest:109:15|h[Westfall Stew]|h|r cost to complete", { "4 Linen Cloth", "= 36s" }, { "starts at" })
