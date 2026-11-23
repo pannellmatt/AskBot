@@ -1361,6 +1361,12 @@ local function costWords(q)
 end
 
 --- "what reagent quests are in my level range", "ah quests", "quests i can buy".
+--- "log" anywhere ("ah quests in my log", "log ah quests") keeps it to your quest log.
+local function reagentLogOnly(q)
+    for x in q:gmatch("%a+") do if x == "log" then return true end end
+    return false
+end
+
 local function reagentQuestsQuestion(q)
     local w = {}
     for x in q:gmatch("%a+") do w[x] = true end
@@ -1414,7 +1420,7 @@ end
 
 --- Quests you can take (or have) that only want mob-dropped items, some or all of them reagents
 --- the AH sells: your log first, then the ones the AH covers fully, each best XP per gold first.
-local function answerReagentQuests()
+local function answerReagentQuests(logOnly)
     local P = AskBot.Prices
     local maxLevel = askerLevel() + 5 -- not the level-60 war-effort quests anyone can take
     local rows, seen = {}, {}
@@ -1431,8 +1437,11 @@ local function answerReagentQuests()
     for _, q in ipairs(questLogEntries()) do
         if not questComplete(q.id) then add(q.id, true) end
     end
-    for _, id in ipairs(doableQuests()) do add(id, false) end
+    if not logOnly then
+        for _, id in ipairs(doableQuests()) do add(id, false) end
+    end
     if #rows == 0 then
+        if logOnly then return say("No quests in your log that the auction house can help with.") end
         return say("No quests near your level that only want reagents from the auction house, as far as Questie knows.")
     end
     table.sort(rows, function(a, b)
@@ -1440,7 +1449,8 @@ local function answerReagentQuests()
         if a.value ~= b.value then return a.value > b.value end
         return a.xp > b.xp
     end)
-    say("AH reagent quests (" .. #rows .. "), your log first, then best xp per gold:")
+    say(logOnly and ("AH reagent quests in your log (" .. #rows .. "), best xp per gold first:")
+        or ("AH reagent quests (" .. #rows .. "), your log first, then best xp per gold:"))
     local first
     for i = 1, math.min(6, #rows) do
         local r = rows[i]
@@ -1451,7 +1461,7 @@ local function answerReagentQuests()
         if turnIn then where = " - hand in " .. placeText(turnIn, QuestDB.name(r.id)) end
         if giver then where = where .. GREY .. " (from " .. giver.place.name .. ")|r" end
         say("  " .. questLabel(r.id) .. (r.xp > 0 and (GREY .. " " .. r.xp .. "xp|r") or "")
-            .. (r.inLog and (GREY .. " [in log]|r") or "") .. ": " .. shoppingText(r.list) .. cost .. where)
+            .. (r.inLog and not logOnly and (GREY .. " [in log]|r") or "") .. ": " .. shoppingText(r.list) .. cost .. where)
         first = first or giver or turnIn
     end
     sayShoppingList(rows, math.min(6, #rows))
@@ -1854,6 +1864,7 @@ Levelling.bestQuestsQuestion, Levelling.answerBestQuests = bestQuestsQuestion, a
 Levelling.killQuestsQuestion, Levelling.answerKillQuests = killQuestsQuestion, answerKillQuests
 Levelling.costSubject, Levelling.costWords, Levelling.answerQuestCost = costSubject, costWords, answerQuestCost
 Levelling.reagentQuestsQuestion, Levelling.answerReagentQuests = reagentQuestsQuestion, answerReagentQuests
+Levelling.reagentLogOnly = reagentLogOnly
 Levelling.routeSubject, Levelling.answerRouteTo = routeSubject, answerRouteTo
 Levelling.questsNearSubject, Levelling.answerQuestsNear = questsNearSubject, answerQuestsNear
 Levelling.sameAreaLine = sameAreaLine

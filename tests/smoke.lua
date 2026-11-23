@@ -709,6 +709,14 @@ do
     ask("ah quests", { "Westfall Stew", "6 Linen Cloth|cffaaaaaa (farm 3 Okra)|r ~54s",
         "To buy for this quest, ~54s in all:", "6 Linen Cloth x 9s = 54s", "Farm yourself (not on the AH): 3 Okra" })
     ask("cost to complete westfall stew", { "~54s to buy", "3 Okra: can't be bought" })
+    -- "log" limits it to your quest log: nothing there until Westfall Stew is taken.
+    ask("ah quests in my log", "No quests in your log that the auction house can help with.", { "Westfall Stew" })
+    local savedInfo, savedNum = C_QuestLog.GetInfo, C_QuestLog.GetNumQuestLogEntries
+    C_QuestLog.GetNumQuestLogEntries = function() return 1 end
+    C_QuestLog.GetInfo = function(n) return n == 1 and { questID = 109, title = "Westfall Stew" } or nil end
+    questLog[109] = { complete = false, objectives = {} }
+    ask("log ah quests", { "AH reagent quests in your log (1)", "Westfall Stew", "Farm yourself" }, { "[in log]" })
+    C_QuestLog.GetInfo, C_QuestLog.GetNumQuestLogEntries, questLog[109] = savedInfo, savedNum, nil
     quests[109][7], quests[109][11] = saved[1], saved[2]
     items[732], gear[732] = nil, nil
 end

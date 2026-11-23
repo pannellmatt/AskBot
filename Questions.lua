@@ -270,7 +270,9 @@ local function answer(question)
     end
     local costOf = not questId and AskBot.Levelling.costSubject(q)
     if costOf then return AskBot.Levelling.answerQuestCost(costOf) end
-    if not questId and AskBot.Levelling.reagentQuestsQuestion(q) then return AskBot.Levelling.answerReagentQuests() end
+    if not questId and AskBot.Levelling.reagentQuestsQuestion(q) then
+        return AskBot.Levelling.answerReagentQuests(AskBot.Levelling.reagentLogOnly(q))
+    end
 
     if questId then
         if intent == "whoHas" then return answerWhoHas(nil, tonumber(questId)) end
