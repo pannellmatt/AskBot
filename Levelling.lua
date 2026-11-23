@@ -1205,7 +1205,8 @@ local function tradeGood(itemId)
     return gameCls == 7 or typeName == "Trade Goods"
 end
 
---- A quest whose only objectives are trade goods that mobs drop and the AH can sell.
+--- A quest whose only objectives are items that mobs drop: "full" if the AH sells every one as a
+--- trade good, "partial" if it sells some (Westfall Stew: three meats on the AH, Okra a quest item).
 local function reagentQuest(id)
     local o = QuestDB.objectives(id) or {}
     if not (o[3] and #o[3] > 0) then return false end
@@ -1213,16 +1214,18 @@ local function reagentQuest(id)
         if type(o[i]) == "table" and #o[i] > 0 then return false end
     end
     if QuestDB.triggerEnd and QuestDB.triggerEnd(id) then return false end
-    local items = {}
+    local items, buyable = {}, 0
     for _, c in ipairs(o[3]) do
         local drops = ItemDB.npcDrops(c[1])
-        if not (drops and #drops > 0 and tradeGood(c[1]) and auctionable(c[1])) then return false end
+        if not (drops and #drops > 0) then return false end
+        if tradeGood(c[1]) and auctionable(c[1]) then buyable = buyable + 1 end
         items[c[1]] = true
     end
     for _, itemId in ipairs((QuestDB.requiredSourceItems and QuestDB.requiredSourceItems(id)) or {}) do
         if not items[itemId] then return false end
     end
-    return true
+    if buyable == 0 then return false end
+    return buyable == #o[3] and "full" or "partial"
 end
 
 --- Cheapest known price for one: the AH, or a vendor when Questie lists one and it's cheaper.
@@ -1253,7 +1256,7 @@ local function questShopping(id)
         local e = { id = itemId, name = name, count = count, have = have, need = math.max(0, count - have),
             buyable = auctionable(itemId) }
         if e.buyable then e.price, e.from = unitPrice(itemId) end
-        if e.need > 0 then
+        if e.need > 0 and e.buyable then -- quest items aren't counted: there's nothing to pay
             if e.price and total then total = total + e.price * e.need else total = nil end
         end
         list[#list + 1] = e
@@ -1261,13 +1264,18 @@ local function questShopping(id)
     return list, total
 end
 
---- "6 Linen Cloth" for what's still needed.
+--- "6 Linen Cloth" for what's still needed, then "(farm 3 Okra)" for what can't be bought.
 local function shoppingText(list)
-    local parts = {}
+    local parts, farm = {}, {}
     for _, e in ipairs(list) do
-        if e.need > 0 then parts[#parts + 1] = e.need .. " " .. e.name end
+        if e.need > 0 then
+            local t = e.buyable and parts or farm
+            t[#t + 1] = e.need .. " " .. e.name
+        end
     end
-    return #parts > 0 and table.concat(parts, ", ") or "you have them all"
+    local text = #parts > 0 and table.concat(parts, ", ") or (#farm > 0 and "nothing to buy" or "you have them all")
+    if #farm > 0 then text = text .. GREY .. " (farm " .. table.concat(farm, ", ") .. ")|r" end
+    return text
 end
 
 --- Where to go: the giver (if it's not in your log yet) and the turn-in.
@@ -1369,18 +1377,20 @@ local function sayShoppingList(rows, n)
         for _, e in ipairs(rows[i].list) do
             local t = items[e.id]
             if not t then
-                t = { name = e.name, count = 0, have = e.have, price = e.price, from = e.from }
+                t = { name = e.name, count = 0, have = e.have, price = e.price, from = e.from, buyable = e.buyable }
                 items[e.id] = t
                 order[#order + 1] = e.id
             end
             t.count = t.count + e.count
         end
     end
-    local lines, total = {}, 0
+    local lines, total, farm = {}, 0, {}
     for _, itemId in ipairs(order) do
         local t = items[itemId]
         local need = math.max(0, t.count - t.have)
-        if need > 0 then
+        if need > 0 and not t.buyable then
+            farm[#farm + 1] = need .. " " .. t.name
+        elseif need > 0 then
             local have = t.have > 0 and (GREY .. " (have " .. t.have .. ")|r") or ""
             if t.price then
                 lines[#lines + 1] = need .. " " .. t.name .. have .. " x " .. P.Format(t.price)
@@ -1393,22 +1403,29 @@ local function sayShoppingList(rows, n)
         end
     end
     local these = n == 1 and "this quest" or ("these " .. n)
-    if #lines == 0 then return say("You already have everything for " .. these .. ".") end
-    say("To buy for " .. these .. (total and (", ~" .. P.Format(total) .. " in all") or "") .. ":")
-    for _, l in ipairs(lines) do say("  " .. l) end
+    if #lines == 0 then
+        say("Nothing to buy for " .. these .. (#farm > 0 and "." or ": you have everything."))
+    else
+        say("To buy for " .. these .. (total and (", ~" .. P.Format(total) .. " in all") or "") .. ":")
+        for _, l in ipairs(lines) do say("  " .. l) end
+    end
+    if #farm > 0 then say(GREY .. "  Farm yourself (not on the AH): " .. table.concat(farm, ", ") .. "|r") end
 end
 
---- Quests you can take (or have) that only want reagents from the AH, best XP per gold first.
+--- Quests you can take (or have) that only want mob-dropped items, some or all of them reagents
+--- the AH sells: your log first, then the ones the AH covers fully, each best XP per gold first.
 local function answerReagentQuests()
     local P = AskBot.Prices
     local maxLevel = askerLevel() + 5 -- not the level-60 war-effort quests anyone can take
     local rows, seen = {}, {}
     local function add(id, inLog)
-        if seen[id] or (QuestDB.questLevel(id) or 0) > maxLevel or not reagentQuest(id) then return end
+        local kind = not seen[id] and (QuestDB.questLevel(id) or 0) <= maxLevel and reagentQuest(id)
+        if not kind then return end
         seen[id] = true
         local list, total = questShopping(id)
         local xp = questXP(id) or 0
         rows[#rows + 1] = { id = id, inLog = inLog, list = list, total = total, xp = xp,
+            group = inLog and 1 or kind == "full" and 2 or 3,
             value = total and xp / math.max(total, 1) or -1 }
     end
     for _, q in ipairs(questLogEntries()) do
@@ -1419,10 +1436,11 @@ local function answerReagentQuests()
         return say("No quests near your level that only want reagents from the auction house, as far as Questie knows.")
     end
     table.sort(rows, function(a, b)
+        if a.group ~= b.group then return a.group < b.group end
         if a.value ~= b.value then return a.value > b.value end
         return a.xp > b.xp
     end)
-    say("Quests you can finish with AH reagents (" .. #rows .. "), best xp per gold first:")
+    say("AH reagent quests (" .. #rows .. "), your log first, then best xp per gold:")
     local first
     for i = 1, math.min(6, #rows) do
         local r = rows[i]

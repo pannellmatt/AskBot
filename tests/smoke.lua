@@ -695,10 +695,23 @@ ask("kill and loot quests", { "Kill and loot quests to pick up in Westfall", "Go
     { "Patrolling Westfall", "Bounty on Murlocs" })
 -- Quests finished with AH reagents: Westfall Stew (6 Linen Cloth, a mob-dropped trade good, 9s
 -- on the AH by now) yes; Red Linen Goods (also kills) and Goretusk Liver Pie (kills only) no.
-ask("what reagent quests are in my level range", { "Quests you can finish with AH reagents (1)",
+ask("what reagent quests are in my level range", { "AH reagent quests (1)",
     "Westfall Stew", "6 Linen Cloth ~54s", "hand in |cffffd100Gryan Stoutmantle" },
     { "Red Linen Goods", "Goretusk Liver Pie", "Bounty on Murlocs" })
 ask("ah quests", { "To buy for this quest, ~54s in all:", "6 Linen Cloth x 9s = 54s" })
+-- Forever's real Westfall Stew also wants Okra, a quest item (class 12) mobs drop: still listed,
+-- the Okra to farm, only the linen to buy.
+do
+    local saved = { quests[109][7], quests[109][11] }
+    quests[109][7] = { nil, nil, { { 2589 }, { 732 } } }
+    quests[109][11] = { "Bring 6 Linen Cloth and 3 Okra to Gryan Stoutmantle." }
+    items[732], gear[732] = { name = "Okra", npcDrops = { 10 } }, { "Okra", "", 12, 0, 0, 1 }
+    ask("ah quests", { "Westfall Stew", "6 Linen Cloth|cffaaaaaa (farm 3 Okra)|r ~54s",
+        "To buy for this quest, ~54s in all:", "6 Linen Cloth x 9s = 54s", "Farm yourself (not on the AH): 3 Okra" })
+    ask("cost to complete westfall stew", { "~54s to buy", "3 Okra: can't be bought" })
+    quests[109][7], quests[109][11] = saved[1], saved[2]
+    items[732], gear[732] = nil, nil
+end
 bags[2589] = 2
 ask("ah quests", { "To buy for this quest, ~36s in all:", "4 Linen Cloth|cffaaaaaa (have 2)|r x 9s = 36s" })
 ask("cost to complete westfall stew", { "Westfall Stew", "4 Linen Cloth", "(have 2)", "x 9s = 36s",
