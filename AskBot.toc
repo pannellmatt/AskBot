@@ -2,7 +2,7 @@
 ## Title: AskBot
 ## Notes: Ask where things are: /askbot where is my nearest skinning trainer
 ## Author: pannellmatt
-## Version: 0.25.0
+## Version: 0.26.0
 ## X-License: GPL-3.0-or-later
 ## Dependencies: QuestieDB, Questie
 ## OptionalDeps: TomTom, AtlasLootClassic, Auctionator
