@@ -1077,6 +1077,8 @@ trainerList = { { "Growl", "Rank 2", "available", nil, 10, 100 } }
 fire("TRAINER_SHOW")
 advance(1)
 ask("spells i can learn", "Ready to train (1): |cffffd100Rend|r 3", { "Growl" })
+ask("skills available", "Ready to train (1): |cffffd100Rend|r 3")
+ask("available spells", "Ready to train (1): |cffffd100Rend|r 3")
 -- Forever's rows: name, type, no rank. Each rank of a spell is its own entry (by level), and
 -- an old list that stored the type as the rank is dropped.
 AskBotCharDB.training.spells["Heroic Strike|unavailable"] = { name = "Heroic Strike", rank = "unavailable", level = 56 }

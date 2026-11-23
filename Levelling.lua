@@ -868,7 +868,7 @@ local function trainingQuestion(q)
     local noun, verb
     for w in q:gmatch("%a+") do
         if TRAIN_NOUNS[w] then noun = true end
-        if w == "learn" or w == "train" or w == "trainable" or w == "learnable" then verb = true end
+        if w == "learn" or w == "train" or w == "trainable" or w == "learnable" or w == "available" then verb = true end
     end
     return noun and verb or false
 end
