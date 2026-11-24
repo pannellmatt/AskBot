@@ -343,13 +343,60 @@ function Prices.HasHistory()
     return type(adb) == "table" and type(adb.Typical) == "function"
 end
 
---- Typical AH price of the item at your faction's auction house, and the days it's based on;
---- nil until AHDB has seen it on MIN_DAYS different days.
+-- Until then, the median of the lowest buyouts of AHDB's recent scans (MIN_SCANS or more) stands in:
+-- prices swing within the day (Wool Cloth 1s 58c -> 50c in an hour), one scan can't be trusted.
+local MIN_SCANS = 3
+
+local function median(values)
+    table.sort(values)
+    local n = #values
+    if n == 0 then return nil end
+    if n % 2 == 1 then return values[(n + 1) / 2] end
+    return math.floor((values[n / 2] + values[n / 2 + 1]) / 2)
+end
+
+--- Lowest buyouts of AHDB's scans of the item in the last `days` days, oldest first.
+local function scanMins(id, days)
+    local adb = _G.AuctionDB
+    if not (type(adb.RecentHistory) == "function" and GetServerTime) then return {} end
+    local ok, list = pcall(adb.RecentHistory, adb, id, adb:PlayerHouse())
+    local from, mins = GetServerTime() - days * 86400, {}
+    if ok and type(list) == "table" then
+        for _, p in ipairs(list) do
+            if p[1] and p[1] >= from and p[2] and p[2] > 0 then mins[#mins + 1] = p[2] end
+        end
+    end
+    return mins
+end
+
+--- Typical AH price of the item at your faction's auction house, the days it's based on, and
+--- the number of scans when it's from the recent scans only (AHDB has seen it on fewer than
+--- MIN_DAYS days); nil when there's too little to go on.
 function Prices.Typical(id)
     if not (id and Prices.HasHistory()) then return nil end
     local adb = _G.AuctionDB
     local ok, low, _, days = pcall(adb.Typical, adb, id, adb:PlayerHouse(), HISTORY_DAYS)
     if ok and low and low > 0 and days and days >= MIN_DAYS then return low, days end
+    local mins = scanMins(id, 7)
+    if #mins >= MIN_SCANS then return median(mins), (ok and days and days > 0) and days or 1, #mins end
+end
+
+-- The lowest buyout swinging this much between the scans of the last 2 days: a profit worked out
+-- from the price now may be gone by the time yours is listed (84s 98c undercut to 59s 99c).
+local UNSTABLE = 1.4
+
+--- Has the item's lowest AH price swung a lot across the scans of the last 2 days?
+function Prices.Unstable(id)
+    if not (id and Prices.HasHistory()) then return false end
+    local mins = scanMins(id, 2)
+    if #mins < MIN_SCANS then return false end
+    table.sort(mins)
+    return mins[#mins] >= mins[1] * UNSTABLE
+end
+
+--- " price unstable" in orange when the item's AH price has been swinging, else "".
+function Prices.UnstableNote(id)
+    return Prices.Unstable(id) and " |cffff8040price unstable|r" or ""
 end
 
 -- Fewer listings than this and one seller sets the price (one overpriced listing looked like profit).

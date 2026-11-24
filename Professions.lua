@@ -439,7 +439,7 @@ local function answerMats(recipe, prof, count, ignoreHeld)
         local perItem = fullCost / made
         summary = summary .. ". On the AH it sells for " .. P.Format(sells) .. " each"
             .. (spiked and (GREY .. " (usual price; listed at " .. P.Format(P.Auction(recipe.item)) .. " now)|r") or "")
-            .. P.ThinNote(recipe.item) .. ", "
+            .. P.ThinNote(recipe.item) .. P.UnstableNote(recipe.item) .. ", "
             .. (sells > perItem and ("so crafting saves " .. P.Format(math.floor(sells - perItem)) .. " each")
                 or ("so buying it is " .. P.Format(math.floor(perItem - sells)) .. " cheaper each"))
     end
@@ -1044,7 +1044,7 @@ local function answerProfit(prof)
         say("  " .. itemLinkText(e.item) .. each .. " |cff40ff40+" .. AskBot.Prices.Format(e.profit) .. "|r"
             .. GREY .. " (sells " .. AskBot.Prices.Format(e.sale) .. (e.where == "vendor" and " to a vendor" or "")
             .. ", mats " .. AskBot.Prices.Format(e.cost) .. ")|r"
-            .. (e.where == "AH" and AskBot.Prices.ThinNote(e.item) or "") .. (TAG[e.colour] or "")
+            .. (e.where == "AH" and (AskBot.Prices.ThinNote(e.item) .. AskBot.Prices.UnstableNote(e.item)) or "") .. (TAG[e.colour] or "")
             .. (e.learn and (" learn: " .. learnFrom(e.learn)) or "")
             .. " " .. makeLink("list", function()
                 answerMats({ name = e.name, item = e.item, made = e.made, reagents = e.reagents }, prof, 1)

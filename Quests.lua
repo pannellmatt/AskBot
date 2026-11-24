@@ -743,10 +743,11 @@ local function priceLine(id)
             local listed = P.Listed(id)
             parts[#parts + 1] = "AH " .. P.Format(price) .. " " .. GREY .. "(" .. when .. ")|r"
                 .. (P.Thin(id) and P.ThinNote(id) or listed and (GREY .. " " .. listed .. " listed|r") or "")
-            local typical, days = P.Typical(id)
+                .. P.UnstableNote(id)
+            local typical, days, scans = P.Typical(id)
             if typical and typical ~= price then
                 parts[#parts + 1] = (price > typical * 1.25 and "|cffff8040usually " or "usually ") .. P.Format(typical)
-                    .. "|r " .. GREY .. "(" .. days .. " days)|r"
+                    .. "|r " .. GREY .. "(" .. (scans and (scans .. " scans") or (days .. " days")) .. ")|r"
             end
         else
             parts[#parts + 1] = "no AH price yet " .. GREY .. "(ask again at the auction house)|r"

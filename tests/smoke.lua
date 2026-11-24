@@ -1213,6 +1213,30 @@ ask("mats for linen bag", { "sells for 20s each", "(usual price; listed at 50s n
 ask("price of " .. il(4238), { "AH 50s", "only 1 listed", "usually 20s", "(10 days)" })
 ask("price of linen cloth", { "seen today", "40 listed" }, { "usually", "only" })
 ask("price of " .. il(2996), "AH 4s", { "listed" })
+-- Only today's scans so far (AHDB's Typical has 1 day): the median of the scans' lowest buyouts
+-- stands in. The bag's swung 50s -> 20s between scans: valued at 22s and flagged unstable.
+do
+    local now = GetServerTime()
+    local function scans(...)
+        local list = {}
+        for i, min in ipairs({ ... }) do list[i] = { now - (4 - i) * 1200, min, min, 10 } end
+        return list
+    end
+    AuctionDB = { PlayerHouse = function() return "Alliance" end,
+        Typical = function() return 0, 0, 1 end,
+        RecentHistory = function(_, id, house)
+            assert(house == "Alliance")
+            if id == 4238 then return scans(5000, 2000, 2200) end
+            if id == 2589 then return scans(900, 880, 850) end
+            if id == 2996 then return scans(400, 390) end    -- too few scans to go on
+            return {}
+        end }
+    ask("tailoring for profit", { "[Linen Bag]|r |cff40ff40+8s 60c|r", "|cffff8040price unstable|r" }, { "+35s 20c" })
+    ask("mats for linen bag", { "sells for 22s each", "(usual price; listed at 50s now)|r |cffff8040price unstable|r" })
+    ask("price of " .. il(4238), { "AH 50s", "price unstable", "usually 22s", "(3 scans)" })
+    ask("price of linen cloth", { "usually 8s 80c", "(3 scans)" }, { "unstable" })
+    ask("price of " .. il(2996), "AH 4s", { "usually", "unstable" })
+end
 AuctionDB, GetServerTime = nil, nil
 ask("nearest tailoring trainer for levelling up", "Tailoring trainer", { "cheapest skill-ups" })
 ask("recipe for red linen bag", { "Pattern: Red Linen Bag", "Thread Seller" })
