@@ -1703,6 +1703,32 @@ expectChat("party: !ask from a differently written name, with the sender's GUID"
     fire("CHAT_MSG_PARTY", "!ask where is everyone", "Buddy Hunterson-Realm", "", "", "", "", 0, 0, "", 0, 1, "Player-1-0002")
 end, { "PARTY: [AskBot] Your group:", "Me <20 Warrior> - Westfall 50.0, 50.0" }, { "you're not in it", "Buddy <" })
 advance(10)
+-- Secret values (CHAT_MSG_PARTY_LEADER in an instance): type() says "string", but comparing or
+-- reading one errors. A secret GUID falls back to the name; a secret message is skipped.
+do
+    local realType = type
+    local function secret() return setmetatable({}, { __index = function() error("attempt to index a secret value") end,
+        __concat = function() error("attempt to concatenate a secret value") end }) end
+    local secrets = {}
+    local function mark(v) secrets[v] = true; return v end
+    type = function(v) if secrets[v] then return "string" end return realType(v) end
+    issecretvalue = function(v) return secrets[v] == true end
+    local errors = 0
+    local realHandler = geterrorhandler
+    geterrorhandler = function() return function(e) errors = errors + 1; print("ERROR HANDLER: " .. tostring(e)) end end
+    advance(10)
+    expectChat("party leader: !ask with a secret GUID", function()
+        fire("CHAT_MSG_PARTY_LEADER", "!ask where is my party", "Buddy Hunterson-Realm", "", "", "", "", 0, 0, "", 0, 1,
+            mark(secret()))
+    end, { "PARTY: [AskBot] Your group:", "Me <20 Warrior>" }, { "you're not in it", "Buddy <" })
+    advance(10)
+    expectChat("party leader: a secret message", function()
+        fire("CHAT_MSG_PARTY_LEADER", mark(secret()), "Buddy")
+    end)
+    advance(10)
+    if errors > 0 then failures = failures + 1; print("   !! FAIL: secret values raised " .. errors .. " error(s)") end
+    type, issecretvalue, geterrorhandler = realType, nil, realHandler
+end
 expectChat("party: !ask from a full name without a GUID", function()
     fire("CHAT_MSG_PARTY", "!ask where is my group", "Buddy Hunterson")
 end, { "PARTY: [AskBot] Your group:", "Me <20 Warrior>" }, { "you're not in it", "Buddy <" })

@@ -24,6 +24,12 @@ local CLAIM_TIME = 30     -- seconds a question counts as answered
 local claimed = {}        -- question key -> time someone's AskBot answered it
 local lastBySender, lastAnswer = {}, -math.huge
 
+--- v, or nil when the client made it a secret value (unreadable to addons, comparing errors).
+local function readable(v)
+    if v ~= nil and issecretvalue and issecretvalue(v) then return nil end
+    return v
+end
+
 local function shortName(name)
     return name and (name:match("^([^%-]+)") or name)
 end
@@ -69,8 +75,8 @@ local function findAsker(sender, guid)
     for _, unit in ipairs(units) do
         -- Match by GUID when the chat event gave one: names can differ in form (realm,
         -- Forever's surnames) between chat and the unit API.
-        local same = UnitExists(unit) and ((guid and UnitGUID and UnitGUID(unit) == guid)
-            or (not guid and AskBot.Data.SameName(UnitName(unit), name)))
+        local same = UnitExists(unit) and ((guid and UnitGUID and readable(UnitGUID(unit)) == guid)
+            or (not guid and readable(UnitName(unit)) and AskBot.Data.SameName(UnitName(unit), name)))
         if same then
             local _, classFile = UnitClass(unit)
             asker.class, asker.level, asker.unit = classFile, UnitLevel(unit), unit
@@ -199,7 +205,10 @@ end
 --------------------------------------------------------------------------------------------
 
 local function onChat(event, msg, sender, ...)
-    local guid = select(10, ...) -- the sender's GUID (the event's 12th value)
+    -- The client can hand chat values over as "secret" (in instances, for one): addons can pass
+    -- them on but not compare or read them. Without the message or name there's nothing to answer.
+    if readable(msg) == nil or readable(sender) == nil then return end
+    local guid = readable(select(10, ...)) -- the sender's GUID (the event's 12th value)
     if type(guid) ~= "string" or guid == "" then guid = nil end
     local channel = CHANNELS[event]
     if not channel or not AskBot.Option(channel.option) or type(msg) ~= "string" then return end
@@ -216,7 +225,7 @@ local function onChat(event, msg, sender, ...)
     -- Several AskBots may hear the same question: wait a moment, and skip it if another
     -- one claims it first. The asker's own AskBot answers straight away.
     local key = (name .. ":" .. question):sub(1, 200)
-    local isMe = (guid and UnitGUID and guid == UnitGUID("player")) or (not guid and AskBot.Data.SameName(name, UnitName("player")))
+    local isMe = (guid and UnitGUID and guid == readable(UnitGUID("player"))) or (not guid and AskBot.Data.SameName(name, UnitName("player")))
     local delay = (channel.sync and not isMe) and (0.3 + math.random() * 1.2) or 0
     C_Timer.After(delay, function()
         if (claimed[key] and GetTime() - claimed[key] < CLAIM_TIME) or GetTime() - lastAnswer < GLOBAL_COOLDOWN then
@@ -245,7 +254,7 @@ end
 frame:SetScript("OnEvent", function(_, event, ...)
     if event == "CHAT_MSG_ADDON" then
         local prefix, text, _, sender = ...
-        if prefix == SYNC_PREFIX and not AskBot.Data.SameName(sender, UnitName("player")) then
+        if readable(prefix) == SYNC_PREFIX and readable(sender) and readable(text) and not AskBot.Data.SameName(sender, UnitName("player")) then
             local key = type(text) == "string" and text:match("^claim:(.+)$")
             if key then claimed[key] = GetTime() end
         end
