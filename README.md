@@ -113,14 +113,14 @@ What a boss drops, with drop rates, plus a pin on the dungeon entrance.
 - `/ab Deadmines loot`
 
 ### Prices *(with Auctionator)*
-The auction house price, how old that price is, and what vendors pay.
+The auction house price, how old that price is, what vendors charge and what they pay.
 
 - `/ab price of Linen Cloth`
 - `/ab how much is [item] worth`
 
-Ask at the auction house and AskBot checks the live price for you. Away from it, you get the price from Auctionator's last scan. AskBot also keeps a list of the items you've asked about: `/ab refresh prices` re-checks them all, straight away at the auction house or automatically the next time you open it, and tells you what changed.
+Ask at the auction house and AskBot checks the live price for you. Away from it, you get the price from Auctionator's last scan. AskBot also keeps a list of the items you've asked about: `/ab refresh prices` re-checks them all, straight away at the auction house or automatically the next time you open it, and tells you what changed. What vendors charge is recorded each time you open a merchant; until you've visited one that sells the item, it's an estimate (`~`).
 
-With **AHDB** (Auction House DataBase) installed too, AskBot uses its price history so one overpriced listing can't fool you: anything you'd sell (profit lists, "sells for", junk to the AH) is valued at the lower of the latest price and the usual one (the 30-day median of each day's lowest price, once AHDB has seen it on 3 days), prices show `usually X`, mats you'd buy during a spike are flagged `usually X`, and `only N listed` warns when one or two listings set the price. AskBot takes whichever is newer of Auctionator's price and AHDB's last full scan, so you can turn off Auctionator's autoscan (its scan and AHDB's get in each other's way).
+With **AHDB** (Auction House DataBase) installed too, AskBot uses its price history so one overpriced listing can't fool you: anything you'd sell (profit lists, "sells for", junk to the AH) is valued at the lower of the latest price and the usual one (the 30-day median of each day's lowest price, once AHDB has seen it on 3 days; until then, the median of its last scans' lowest prices), prices show `usually X`, mats you'd buy during a spike are flagged `usually X`, `only N listed` warns when one or two listings set the price, and `price unstable` when the lowest price has swung a lot between scans in the last 2 days (a profit worked out now may be undercut before yours sells). AskBot takes whichever is newer of Auctionator's price and AHDB's last full scan, so you can turn off Auctionator's autoscan (its scan and AHDB's get in each other's way).
 
 ### NPCs by name
 - `/ab where is Gryan Stoutmantle`
