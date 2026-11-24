@@ -984,6 +984,12 @@ if lastPinTitle ~= "Copper Vein" then
     failures = failures + 1; print("   !! FAIL: pin title " .. tostring(lastPinTitle))
 end
 ask("where can i get copper ore", "Copper Vein|r <")
+-- A zone after the node limits it to that zone ("tin loch modan", as typed in-game).
+ask("copper dun morogh", { "Copper Vein|r <", "Dun Morogh 10.0, 10.0" }, { "Westfall", "Most nodes", "Sorry" })
+ask("copper in westfall", { "Copper Vein|r <", "- Westfall 40.0, 50.0" }, { "Dun Morogh" })
+ask("where can i mine tin in redridge", { "Tin Vein|r <", "Redridge Mountains 50.0, 50.0" })
+ask("copper ore westfall", "Westfall 40.0, 50.0", { "Dun Morogh" })
+ask("tin westfall", "Questie has no |cffffd100Tin Vein|r spawn points in Westfall.", { "Redridge" })
 ask("copper nodes", "Copper Vein|r <")
 ask("where to mine silver", { "Silver Vein|r <", "You need Mining 75 (you have 70)" })
 ask("peacebloom", { "Peacebloom|r <", "Herbalism 1", "You don't have Herbalism." }, { "Most nodes" })

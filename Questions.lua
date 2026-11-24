@@ -396,8 +396,8 @@ local function answer(question)
     if intent == "gather" or intent == "get" then
         -- "where can I mine copper", "where do I get Peacebloom": a gathering node beats the
         -- item's other sources. Unknown names fall through to the item/NPC/quest search.
-        local nodes = gatherLookup(subject, intent == "gather" and "fuzzy" or "suffix")
-        if nodes then return answerGather(nodes) end
+        local nodes, _, zone = gatherLookup(subject, intent == "gather" and "fuzzy" or "suffix")
+        if nodes then return answerGather(nodes, nil, nil, zone) end
         intent = "get"
     end
 
@@ -439,8 +439,8 @@ local function answer(question)
     if AskBot.Loot.status == "ready" and (exactHits(AskBot.Loot.bossNames, subject2) or exactHits(AskBot.Loot.instanceNames, subject2)) then
         return answerLoot(subject2)
     end
-    local nodes = gatherLookup(subject2)
-    if nodes then return answerGather(nodes) end
+    local nodes, _, zone = gatherLookup(subject2)
+    if nodes then return answerGather(nodes, nil, nil, zone) end
     local hits, others = exactHits(D.npcNames, subject2)
     if hits then return answerNpcName(hits, others) end
     hits, others = exactHits(D.itemNames, subject2)

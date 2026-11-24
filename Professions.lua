@@ -62,7 +62,7 @@ end
 --- Node names for a gathering subject ("copper", "copper ore", "peacebloom", "tin vein").
 --- `mode`: nil for the exact name only; "suffix" also tries adding " ore", " vein" etc.;
 --- "fuzzy" also accepts partial names. Returns the node names and the display name matched.
-local function gatherLookup(subject, mode)
+local function nodeLookup(subject, mode)
     subject = subject:gsub("^the ", "")
     local tries = { subject }
     if mode then
@@ -81,15 +81,68 @@ local function gatherLookup(subject, mode)
     end
 end
 
+--- Is the zone on `uiMapId` called `key` (a NameKey)? "stormwind" matches Stormwind City.
+local function zoneIs(uiMapId, key)
+    local name = D.NameKey(D.ZoneName(uiMapId) or "")
+    return name == key or name:sub(1, #key + 1) == key .. " "
+end
+
+--- The uiMapId of a spawn of these gathering nodes in zone `key`, or nil.
+local function nodesIn(nodeNames, key)
+    for _, name in ipairs(nodeNames) do
+        local p = D.GatherPlace(name)
+        for _, s in ipairs(p and p.spawns or {}) do
+            if s.uiMapId and zoneIs(s.uiMapId, key) then return s.uiMapId end
+        end
+    end
+end
+
+--- Like nodeLookup, plus a zone after the node ("tin loch modan", "copper in elwynn"): returns
+--- the node names, the display name and the zone ({ key = NameKey, map = uiMapId }). The zone must be one some
+--- gathering node spawns in, so "tin loch modan" can't be mistaken for a longer node name.
+local function gatherLookup(subject, mode)
+    local nodes, display = nodeLookup(subject, mode)
+    if nodes then return nodes, display end
+    local words = {}
+    for w in subject:gmatch("%S+") do words[#words + 1] = w end
+    for i = #words - 1, 1, -1 do
+        local left = table.concat(words, " ", 1, i):gsub(" in$", ""):gsub(" at$", ""):gsub(" around$", "")
+        local key = D.NameKey(table.concat(words, " ", i + 1):gsub("^in ", ""):gsub("^at ", ""):gsub("^around ", ""))
+        nodes, display = nodeLookup(left, mode or "suffix")
+        if nodes and key ~= "" then
+            local map = nodesIn(nodes, key)
+            if not map then
+                for other in pairs(D.gather) do
+                    map = nodesIn({ other }, key)
+                    if map then break end
+                end
+            end
+            if map then return nodes, display, { key = key, map = map } end
+        end
+    end
+end
+
 --- Nearest node of each type, then the zones with the most spawn points, then a skill check.
-local function answerGather(nodeNames, heading, noSkillNote)
+--- With `zone` (from gatherLookup), only that zone's spawns count.
+local function answerGather(nodeNames, heading, noSkillNote, zone)
     local places, all = {}, {}
     for _, name in ipairs(nodeNames) do
         local p = D.GatherPlace(name)
+        if p and zone then
+            local inZone = {}
+            for _, s in ipairs(p.spawns) do
+                if s.uiMapId and zoneIs(s.uiMapId, zone.key) then inZone[#inZone + 1] = s end
+            end
+            p = setmetatable({ spawns = inZone }, { __index = p })
+        end
         if p and #p.spawns > 0 then
             places[#places + 1] = p
             for _, s in ipairs(p.spawns) do all[#all + 1] = s end
         end
+    end
+    if #places == 0 and zone then
+        return say("Questie has no " .. GOLD .. table.concat(nodeNames, ", ") .. "|r spawn points in "
+            .. (D.ZoneName(zone.map) or "that zone") .. ".")
     end
     if #places == 0 then
         return say("Questie has no spawn points for " .. GOLD .. table.concat(nodeNames, ", ") .. "|r.")
