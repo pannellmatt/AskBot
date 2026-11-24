@@ -512,14 +512,13 @@ for i = 0, 7 do
     ahPrices[id], ahAges[id] = 2000, 0
 end
 local ahListings = {}   -- item name -> price the next search will find
-vendorPrices = { [2320] = 10 }   -- Auctionator's vendor prices (what a vendor sells it for)
 local searches = 0
 local dbUpdated
 AuctionFrame = { shown = false, IsShown = function(self) return self.shown end }
 Auctionator = { API = { v1 = {
     GetAuctionPriceByItemID = function(caller, id) assert(caller == "AskBot"); return ahPrices[id] end,
     GetAuctionAgeByItemID = function(_, id) return ahAges[id] end,
-    GetVendorPriceByItemID = function(_, id) return vendorPrices[id] end,
+    GetVendorPriceByItemID = function(_, id) return ({ [2320] = 10 })[id] end,
     RegisterForDBUpdate = function(_, fn) dbUpdated = fn end,
     MultiSearchExact = function(_, names)
         if not AuctionFrame.shown then error("Auction house is not open") end
@@ -1237,11 +1236,6 @@ do
     ask("price of " .. il(4238), { "AH 50s", "price unstable", "usually 22s", "(3 scans)" })
     ask("price of linen cloth", { "usually 8s 80c", "(3 scans)" }, { "unstable" })
     ask("price of " .. il(2996), "AH 4s", { "usually", "unstable" })
-    -- A vendor sells the bag for 15s: nobody pays more on the AH, whatever is listed there.
-    vendorPrices[4238] = 1500
-    ask("tailoring for profit", "[Linen Bag]|r |cff40ff40+1s 95c|r", { "+8s 60c" })
-    ask("mats for linen bag", "sells for 15s each|cffaaaaaa (a vendor sells it for that)|r", { "usual price" })
-    vendorPrices[4238] = nil
 end
 AuctionDB, GetServerTime = nil, nil
 ask("nearest tailoring trainer for levelling up", "Tailoring trainer", { "cheapest skill-ups" })

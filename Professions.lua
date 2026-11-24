@@ -428,17 +428,16 @@ local function answerMats(recipe, prof, count, ignoreHeld)
     if haveAll then return say("  You have everything for " .. count .. ".") end
     local summary = "  To buy: " .. (total > 0 and AskBot.Prices.Format(total) or "?") .. (unknown and total > 0 and "+" or "")
     local P = AskBot.Prices
-    local sells, spiked, capped
+    local sells, spiked
     if recipe.item then
         local typical
-        sells, typical, spiked, capped = P.Sale(recipe.item)
+        sells, typical, spiked = P.Sale(recipe.item)
     end
     if sells and total > 0 and not unknown then
         local fullCost = 0
         for _, r in ipairs(recipe.reagents) do fullCost = fullCost + (reagentPrice(r.id) or 0) * r.count end
         local perItem = fullCost / made
         summary = summary .. ". On the AH it sells for " .. P.Format(sells) .. " each"
-            .. (capped and (GREY .. " (a vendor sells it for that)|r") or "")
             .. (spiked and (GREY .. " (usual price; listed at " .. P.Format(P.Auction(recipe.item)) .. " now)|r") or "")
             .. P.ThinNote(recipe.item) .. P.UnstableNote(recipe.item) .. ", "
             .. (sells > perItem and ("so crafting saves " .. P.Format(math.floor(sells - perItem)) .. " each")
