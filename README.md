@@ -93,7 +93,7 @@ AskBot compares what you're wearing with gear you can get soon: rewards from que
 ### Mining, herbs and fishing schools
 The nearest node, the zones with the most nodes, and whether your skill is high enough (coloured like the game's skill-up colours).
 
-- `/ab where can I mine copper` (or `/ab copper ore`, `/ab tin nodes`)
+- `/ab where can I mine copper` (or `/ab copper ore`, `/ab tin nodes`); add a zone to stay in it: `/ab tin loch modan`, `/ab copper in elwynn`
 - `/ab Peacebloom` (or `/ab where can I pick Kingsblood`)
 - `/ab where should I mine` / `/ab where should I level herbalism`: the best node for your current skill, and what opens up next.
 
