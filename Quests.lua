@@ -740,7 +740,14 @@ local function priceLine(id)
         if price then
             local when = age == 0 and "seen today" or age == 1 and "seen yesterday" or age and ("seen " .. age .. " days ago")
                 or "over 3 weeks old"
+            local listed = P.Listed(id)
             parts[#parts + 1] = "AH " .. P.Format(price) .. " " .. GREY .. "(" .. when .. ")|r"
+                .. (P.Thin(id) and P.ThinNote(id) or listed and (GREY .. " " .. listed .. " listed|r") or "")
+            local typical, days = P.Typical(id)
+            if typical and typical ~= price then
+                parts[#parts + 1] = (price > typical * 1.25 and "|cffff8040usually " or "usually ") .. P.Format(typical)
+                    .. "|r " .. GREY .. "(" .. days .. " days)|r"
+            end
         else
             parts[#parts + 1] = "no AH price yet " .. GREY .. "(ask again at the auction house)|r"
         end

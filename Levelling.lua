@@ -1317,7 +1317,8 @@ local function answerQuestCost(query, questId)
             text = e.need .. " " .. e.name .. have .. ": can't be bought, it's a quest item"
         elseif e.price then
             text = e.need .. " " .. e.name .. have .. " x " .. P.Format(e.price)
-                .. (e.from == "vendor" and (GREY .. " (vendor)|r") or "") .. " = " .. P.Format(e.price * e.need)
+                .. (e.from == "vendor" and (GREY .. " (vendor)|r") or P.BuyNote(e.id, e.price))
+                .. " = " .. P.Format(e.price * e.need)
         else
             text = e.need .. " " .. e.name .. have .. ": " .. (P.Available() and "no AH price yet" or "no price (install Auctionator)")
         end
@@ -1400,7 +1401,8 @@ local function sayShoppingList(rows, n)
             local have = t.have > 0 and (GREY .. " (have " .. t.have .. ")|r") or ""
             if t.price then
                 lines[#lines + 1] = need .. " " .. t.name .. have .. " x " .. P.Format(t.price)
-                    .. (t.from == "vendor" and (GREY .. " (vendor)|r") or "") .. " = " .. P.Format(t.price * need)
+                    .. (t.from == "vendor" and (GREY .. " (vendor)|r") or P.BuyNote(itemId, t.price))
+                    .. " = " .. P.Format(t.price * need)
                 if total then total = total + t.price * need end
             else
                 lines[#lines + 1] = need .. " " .. t.name .. have .. GREY .. " (no price)|r"

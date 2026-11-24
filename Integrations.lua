@@ -305,9 +305,95 @@ local function call(fn, id)
     return ok and v or nil
 end
 
-function Prices.Auction(id) return call("GetAuctionPriceByItemID", id) end
-function Prices.AgeDays(id) return call("GetAuctionAgeByItemID", id) end
+-- Items AskBot just refreshed through Auctionator (item id -> server time): its price is then
+-- newer than any AHDB scan from before.
+local refreshedAt = {}
+
+--- AHDB's last scan of the item at your faction's AH: lowest buyout, server time; nil if none.
+local function lastScan(id)
+    local adb = _G.AuctionDB
+    if not (id and type(adb) == "table" and adb.LastPrice and GetServerTime) then return nil end
+    local ok, p = pcall(adb.LastPrice, adb, id, adb:PlayerHouse())
+    if ok and type(p) == "table" and p[1] and p[2] and p[2] > 0 then return p[2], p[1] end
+end
+
+--- The latest AH price: Auctionator's, or AHDB's last scan when that's newer (Auctionator only
+--- updates on its own scans and searches). Auctionator only knows the day, so on the same day
+--- AHDB's full scan wins unless AskBot refreshed the item since. Returns price, age in days.
+local function latest(id)
+    local price, age = call("GetAuctionPriceByItemID", id), call("GetAuctionAgeByItemID", id)
+    local scanned, ts = lastScan(id)
+    if not scanned then return price, age end
+    local scanAge = math.max(0, math.floor((GetServerTime() - ts) / 86400))
+    if price and (age and age < scanAge or (refreshedAt[id] or 0) > ts) then return price, age end
+    return scanned, scanAge
+end
+
+function Prices.Auction(id) return (latest(id)) end
+function Prices.AgeDays(id) return select(2, latest(id)) end
 function Prices.VendorBuy(id) return call("GetVendorPriceByItemID", id) end
+
+-- AHDB (Auction House DataBase, global AuctionDB) keeps a price history per auction house from
+-- its full scans. Its typical price is the median, over the last 30 days, of each day's lowest
+-- buyout: one silly listing can't move it, unlike Auctionator's latest price.
+local HISTORY_DAYS, MIN_DAYS = 30, 3
+
+function Prices.HasHistory()
+    local adb = _G.AuctionDB
+    return type(adb) == "table" and type(adb.Typical) == "function"
+end
+
+--- Typical AH price of the item at your faction's auction house, and the days it's based on;
+--- nil until AHDB has seen it on MIN_DAYS different days.
+function Prices.Typical(id)
+    if not (id and Prices.HasHistory()) then return nil end
+    local adb = _G.AuctionDB
+    local ok, low, _, days = pcall(adb.Typical, adb, id, adb:PlayerHouse(), HISTORY_DAYS)
+    if ok and low and low > 0 and days and days >= MIN_DAYS then return low, days end
+end
+
+-- Fewer listings than this and one seller sets the price (one overpriced listing looked like profit).
+local THIN_SUPPLY = 3
+
+--- How many AHDB saw listed at your faction's AH in a scan of the last 2 days, or nil.
+function Prices.Listed(id)
+    if not (id and Prices.HasHistory() and _G.AuctionDB.LastPrice) then return nil end
+    local adb = _G.AuctionDB
+    local ok, p = pcall(adb.LastPrice, adb, id, adb:PlayerHouse())
+    local now = GetServerTime and GetServerTime()
+    if ok and type(p) == "table" and p[1] and p[4] and now and now - p[1] < 2 * 86400 then return p[4] end
+end
+
+--- The listing count when so few are up that the price can't be trusted, else nil.
+function Prices.Thin(id)
+    local n = Prices.Listed(id)
+    if n and n < THIN_SUPPLY then return n end
+end
+
+--- " only 1 listed" in orange when the AH price rests on one or two listings, else "".
+function Prices.ThinNote(id)
+    local n = Prices.Thin(id)
+    return n and (" |cffff8040only " .. n .. " listed|r") or ""
+end
+
+--- " usually 2s" in orange when buying at `price` now pays well over the item's usual AH price
+--- (worth waiting for the spike to pass), else "".
+function Prices.BuyNote(id, price)
+    local typical = price and Prices.Typical(id)
+    if typical and price > typical * 1.25 then return " |cffff8040usually " .. Prices.Format(typical) .. "|r" end
+    return ""
+end
+
+--- What the item can be expected to sell for on the AH: the lower of the latest price and the
+--- typical one, so a brief spike doesn't look like profit. Returns price, typical, spiked
+--- (the latest is well above the typical one).
+function Prices.Sale(id)
+    local live = Prices.Available() and Prices.Auction(id) or nil
+    local typical = Prices.Typical(id)
+    if not typical then return live end
+    if not live then return typical, typical end
+    return math.min(live, typical), typical, live > typical * 1.25
+end
 
 --- What a vendor pays you for the item (from the game's item info), or nil.
 function Prices.VendorSell(id)
@@ -358,7 +444,9 @@ function Prices.Refresh(ids, onDone)
         updateListeners[token] = nil
         if quietTimer then quietTimer:Cancel() end
         if limitTimer then limitTimer:Cancel() end
+        local now = GetServerTime and GetServerTime()
         for _, r in ipairs(results) do
+            if now and reason == "done" and call("GetAuctionAgeByItemID", r.id) == 0 then refreshedAt[r.id] = now end
             r.after, r.age = Prices.Auction(r.id), Prices.AgeDays(r.id)
         end
         onDone(results, reason)

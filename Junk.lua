@@ -125,7 +125,7 @@ function Junk.Scan(ids)
                     and ctx.spec and junkReason(id, quality, ctx)
                 if reason then
                     -- Soulbound items can't be auctioned: vendor them whatever the AH says.
-                    local ah = not bound and P and P.Available() and P.Auction(id) or nil
+                    local ah = not bound and P and P.Sale(id) or nil
                     local net = ah and math.floor(ah * (1 - Junk.AH_CUT))
                     if net and net >= vendor * Junk.AH_RATIO and net - vendor >= Junk.AH_MARGIN then
                         if not seenAh[id] then seenAh[id] = true; out.ah[#out.ah + 1] = { id = id, ah = net, vendor = vendor } end

@@ -608,6 +608,7 @@ do
     end
 end
 -- At the AH, a price question is answered live
+GetServerTime = os.time
 ahListings["Linen Cloth"] = 900
 ask("price of linen cloth", "Checking the auction house")
 do
@@ -616,6 +617,22 @@ do
     if not table.concat(output, "\n", from):find("AH 9s |cffaaaaaa(seen today)", 1, true) then
         failures = failures + 1; print("   !! FAIL: expected live price AH 9s")
     end
+end
+-- AHDB's full scans: AskBot takes the newer of its last scan (7s) and Auctionator's price (9s).
+-- Auctionator only knows "today", so a refresh through AskBot counts as newer than a scan before it.
+do
+    AuctionFrame.shown = false
+    local scanTs
+    AuctionDB = { PlayerHouse = function() return "Alliance" end, Typical = function() return 0, 0, 0 end,
+        LastPrice = function(_, id) if id == 2589 then return { scanTs, 700, 800, 40 } end end }
+    scanTs = os.time() - 600   -- scanned before the live search just now
+    ask("price of linen cloth", "AH 9s", { "AH 7s" })
+    scanTs = os.time() + 60    -- a later scan
+    ask("price of linen cloth", { "AH 7s", "seen today" })
+    ahAges[2589] = 1           -- Auctionator's price is from yesterday, the scan today
+    scanTs = os.time() - 3 * 86400
+    ask("price of linen cloth", { "AH 9s", "seen yesterday" })   -- the scan is older
+    ahAges[2589], AuctionDB, AuctionFrame.shown = 0, nil, true
 end
 ask("refresh prices", { "Refreshing 2 prices" })
 advance(4)
@@ -728,6 +745,12 @@ ask("|cffffff00|Hquest:109:15|h[Westfall Stew]|h|r cost to complete", { "4 Linen
 ask("|cffffff00|Hquest:103:10|h[Red Linen Goods]|h|r how much would it cost", { "4 Linen Cloth",
     "plus objectives you can't buy" })
 ask("|cffffff00|Hquest:110:16|h[Goretusk Liver Pie]|h|r cost", "doesn't ask for items")
+-- AHDB says Linen Cloth is usually 5s: buying at 9s now is flagged.
+AuctionDB = { PlayerHouse = function() return "Alliance" end,
+    Typical = function(_, id) if id == 2589 then return 500, 600, 10 end return 0, 0, 0 end }
+ask("cost to complete westfall stew", "x 9s |cffff8040usually 5s|r = 36s")
+ask("ah quests", "x 9s |cffff8040usually 5s|r = 36s")
+AuctionDB = nil
 bags[2589] = nil
 -- Quest names are links: clicking one asks about that quest.
 do
@@ -1160,6 +1183,31 @@ ask("|cffffd000|Htrade:Player-1:2018:164|h[Tailoring]|h|r for profit", { "Tailor
     "[Linen Bag]|r |cff40ff40+35s 20c|r", "(sells 47s 50c, mats 12s 30c)", "|cffffff00(skill-up)", "[list]",
     "no price for the item or a mat" }, { "cheapest skill-ups", "Bolt of Linen Cloth]|r |c" })
 ask("most profitable tailoring", "Tailoring 75: most profitable crafts")
+-- AHDB's history: the bag usually sells for 20s, so the 50s listing is a spike. Selling is valued
+-- at the lower price (19s after the cut); buying mats still uses the live price.
+GetServerTime = os.time
+AuctionDB = { PlayerHouse = function() return "Alliance" end,
+    Typical = function(_, id, house, days)
+        assert(house == "Alliance" and days == 30)
+        if id == 4238 then return 2000, 2600, 10 end
+        if id == 2589 then return 500, 600, 2 end   -- too few days to trust
+        if id == 2996 then return 200, 250, 10 end  -- the bolts are usually 2s: 4s now is a spike
+        return 0, 0, 0
+    end,
+    -- last scan {ts, min, median, listed}: one bag up (one seller sets its price), plenty of cloth
+    LastPrice = function(_, id)
+        if id == 4238 then return { GetServerTime() - 3600, 5000, 5000, 1 } end
+        if id == 2589 then return { GetServerTime() - 3600, 900, 1000, 40 } end
+        if id == 2996 then return { GetServerTime() - 5 * 86400, 400, 400, 1 } end   -- too old to count
+    end }
+ask("tailoring for profit", { "[Linen Bag]|r |cff40ff40+6s 70c|r", "mats 12s 30c)|r |cffff8040only 1 listed|r" },
+    { "+35s 20c" })
+ask("mats for linen bag", { "sells for 20s each", "(usual price; listed at 50s now)|r |cffff8040only 1 listed|r",
+    "(AH 4s each)|r |cffff8040usually 2s|r" }, { "Thread]|r: buy 3 (vendor 10c each)|r |cffff8040" })
+ask("price of " .. il(4238), { "AH 50s", "only 1 listed", "usually 20s", "(10 days)" })
+ask("price of linen cloth", { "seen today", "40 listed" }, { "usually", "only" })
+ask("price of " .. il(2996), "AH 4s", { "listed" })
+AuctionDB, GetServerTime = nil, nil
 ask("nearest tailoring trainer for levelling up", "Tailoring trainer", { "cheapest skill-ups" })
 ask("recipe for red linen bag", { "Pattern: Red Linen Bag", "Thread Seller" })
 ask("recipe for linen bag", { "You already know", "(Tailoring)", "[mats]" })

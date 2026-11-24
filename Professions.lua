@@ -363,6 +363,7 @@ local function answerMats(recipe, prof, count, ignoreHeld)
             if price then
                 total = total + price * buy
                 line = line .. GREY .. " (" .. where .. " " .. AskBot.Prices.Format(price) .. " each)|r"
+                    .. (where == "AH" and AskBot.Prices.BuyNote(r.id, price) or "")
             elseif where == "vendor" then
                 line = line .. GREY .. " (vendors)|r"; unknown = true
             else
@@ -374,12 +375,18 @@ local function answerMats(recipe, prof, count, ignoreHeld)
     if haveAll then return say("  You have everything for " .. count .. ".") end
     local summary = "  To buy: " .. (total > 0 and AskBot.Prices.Format(total) or "?") .. (unknown and total > 0 and "+" or "")
     local P = AskBot.Prices
-    local sells = recipe.item and P.Available() and P.Auction(recipe.item)
+    local sells, spiked
+    if recipe.item then
+        local typical
+        sells, typical, spiked = P.Sale(recipe.item)
+    end
     if sells and total > 0 and not unknown then
         local fullCost = 0
         for _, r in ipairs(recipe.reagents) do fullCost = fullCost + (reagentPrice(r.id) or 0) * r.count end
         local perItem = fullCost / made
-        summary = summary .. ". On the AH it sells for " .. P.Format(sells) .. " each, "
+        summary = summary .. ". On the AH it sells for " .. P.Format(sells) .. " each"
+            .. (spiked and (GREY .. " (usual price; listed at " .. P.Format(P.Auction(recipe.item)) .. " now)|r") or "")
+            .. P.ThinNote(recipe.item) .. ", "
             .. (sells > perItem and ("so crafting saves " .. P.Format(math.floor(sells - perItem)) .. " each")
                 or ("so buying it is " .. P.Format(math.floor(perItem - sells)) .. " cheaper each"))
     end
@@ -504,7 +511,7 @@ local AH_CUT = AskBot.Junk.AH_CUT
 --- cut), or what it costs from a vendor (you'd only buy it again). nil if neither is known.
 local function holdValue(id)
     local price, source = reagentPrice(id)
-    if source == "AH" then return math.floor(price * (1 - AH_CUT)) end
+    if source == "AH" then return math.floor((AskBot.Prices.Sale(id) or price) * (1 - AH_CUT)) end
     return price
 end
 
@@ -582,7 +589,7 @@ end
 local function saleValue(item, made)
     local P = AskBot.Prices
     if not (item and P) then return nil end
-    local ah = P.Available() and P.Auction(item)
+    local ah = P.Sale(item)
     local net = ah and math.floor(ah * (1 - AH_CUT)) or nil
     local vendor = P.VendorSell and P.VendorSell(item)
     if vendor and (not net or vendor > net) then return vendor * (made or 1), "vendor" end
@@ -708,7 +715,7 @@ local function sayPlan(plan, target)
         local price, source = reagentPrice(id)
         if source == "AH" then
             spare[#spare + 1] = { id = id, n = n }
-            value = value + math.floor(price * (1 - AH_CUT)) * n
+            value = value + math.floor((AskBot.Prices.Sale(id) or price) * (1 - AH_CUT)) * n
         end
     end
     table.sort(spare, function(a, b) return a.id < b.id end)
@@ -983,7 +990,8 @@ local function answerProfit(prof)
         local each = e.made > 1 and (" x" .. e.made) or ""
         say("  " .. itemLinkText(e.item) .. each .. " |cff40ff40+" .. AskBot.Prices.Format(e.profit) .. "|r"
             .. GREY .. " (sells " .. AskBot.Prices.Format(e.sale) .. (e.where == "vendor" and " to a vendor" or "")
-            .. ", mats " .. AskBot.Prices.Format(e.cost) .. ")|r" .. (TAG[e.colour] or "")
+            .. ", mats " .. AskBot.Prices.Format(e.cost) .. ")|r"
+            .. (e.where == "AH" and AskBot.Prices.ThinNote(e.item) or "") .. (TAG[e.colour] or "")
             .. (e.learn and (" learn: " .. learnFrom(e.learn)) or "")
             .. " " .. makeLink("list", function()
                 answerMats({ name = e.name, item = e.item, made = e.made, reagents = e.reagents }, prof, 1)
