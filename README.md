@@ -120,6 +120,8 @@ The auction house price, how old that price is, and what vendors pay.
 
 Ask at the auction house and AskBot checks the live price for you. Away from it, you get the price from Auctionator's last scan. AskBot also keeps a list of the items you've asked about: `/ab refresh prices` re-checks them all, straight away at the auction house or automatically the next time you open it, and tells you what changed.
 
+With **AHDB** (Auction House DataBase) installed too, AskBot uses its price history so one overpriced listing can't fool you: anything you'd sell (profit lists, "sells for", junk to the AH) is valued at the lower of the latest price and the usual one (the 30-day median of each day's lowest price, once AHDB has seen it on 3 days), prices show `usually X`, mats you'd buy during a spike are flagged `usually X`, and `only N listed` warns when one or two listings set the price. AskBot takes whichever is newer of Auctionator's price and AHDB's last full scan, so you can turn off Auctionator's autoscan (its scan and AHDB's get in each other's way).
+
 ### NPCs by name
 - `/ab where is Gryan Stoutmantle`
 
@@ -187,6 +189,7 @@ Thor <Gryphon Master> - Westfall 56.6, 52.6 (71 yds, <1 min)
 | TomTom | Optional | Waypoint arrow |
 | AtlasLoot (Forever) | Optional | Boss loot tables, drop rates, dungeon gear |
 | Auctionator | Optional | Auction house prices |
+| AHDB (Auction House DataBase) | Optional | Price history: usual prices, spike and low-supply warnings |
 
 ## Commands
 
@@ -214,7 +217,7 @@ AskBot answers in whichever chat tab you type in, so you can give it a tab of it
 - **No internet, no AI.** WoW addons can't go online, so AskBot reads the data your other addons already have: Questie's database for locations and quests, AtlasLoot for loot, Auctionator for prices. When those addons update, AskBot's answers improve with them.
 - **Questions are matched by keywords.** AskBot understands the kinds of questions listed above, not anything you can type.
 - **Travel times are estimates.** AskBot doesn't know about mountains or water in the way, and uses average waiting times for boats and zeppelins.
-- **Drop rates** come from AtlasLoot and mostly cover dungeon and raid drops. Prices are only as fresh as your last Auctionator scan.
+- **Drop rates** come from AtlasLoot and mostly cover dungeon and raid drops. Prices are only as fresh as your last Auctionator or AHDB scan.
 - **Gaps in Questie's data.** A few quest items aren't placed by Questie (for example the Trial of the Sea Lion pendant halves). AskBot fills known gaps from public sources, marked *(community info)*, in `KnownLocations.lua`. If you find another, `/ab debug quest [quest link]` shows what Questie has for it. Open an issue with that output and the right location, and it can be added.
 
 ## Credits
