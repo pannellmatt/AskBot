@@ -752,11 +752,11 @@ local function priceLine(id)
         else
             parts[#parts + 1] = "no AH price yet " .. GREY .. "(ask again at the auction house)|r"
         end
-        local vendorBuy = P.VendorBuy(id)
-        if vendorBuy then parts[#parts + 1] = "vendors sell it for " .. P.Format(vendorBuy) end
     else
         parts[#parts + 1] = GREY .. "install Auctionator for auction prices|r"
     end
+    local vendorBuy, estimated = P.VendorBuy(id)
+    if vendorBuy then parts[#parts + 1] = "vendors sell it for " .. (estimated and "~" or "") .. P.Format(vendorBuy) end
     local sell = P.VendorSell(id)
     if sell then parts[#parts + 1] = "vendors pay " .. P.Format(sell) end
     return itemLinkText(id) .. ": " .. table.concat(parts, ", ")

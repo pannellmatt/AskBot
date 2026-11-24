@@ -1,7 +1,7 @@
 -- Integrations.lua
 -- Optional extras from other addons, each used only when installed:
 --   AtlasLoot (Forever build): dungeon/raid boss loot tables and drop rates.
---   Auctionator: auction house and vendor prices.
+--   Auctionator: auction house prices.
 
 local ADDON_NAME, AskBot = ...
 local D = AskBot.Data
@@ -331,7 +331,45 @@ end
 
 function Prices.Auction(id) return (latest(id)) end
 function Prices.AgeDays(id) return select(2, latest(id)) end
-function Prices.VendorBuy(id) return call("GetVendorPriceByItemID", id) end
+-- What vendors charge. Auctionator's "vendor price" is what a vendor pays you (Ice Cold Milk: 6c,
+-- sold at 25c), so AskBot records the merchants' prices itself (account-wide, per item: copper
+-- for one) whenever a merchant window opens.
+local function merchantPrices()
+    AskBotDB = AskBotDB or {}
+    AskBotDB.vendorPrices = AskBotDB.vendorPrices or {}
+    return AskBotDB.vendorPrices
+end
+
+--- Records the price of each item the open merchant sells for gold (not tokens).
+function Prices.RecordMerchant()
+    local count = GetMerchantNumItems and GetMerchantNumItems() or 0
+    local prices = merchantPrices()
+    for i = 1, count do
+        local id = GetMerchantItemID and GetMerchantItemID(i)
+        local price, stack, extended
+        if C_MerchantFrame and C_MerchantFrame.GetItemInfo then
+            local info = C_MerchantFrame.GetItemInfo(i)
+            if info then price, stack, extended = info.price, info.stackCount, info.hasExtendedCost end
+        elseif GetMerchantItemInfo then
+            local _, _, p, q, _, _, _, ext = GetMerchantItemInfo(i)
+            price, stack, extended = p, q, ext
+        end
+        if id and price and price > 0 and not extended then
+            prices[id] = math.ceil(price / math.max(stack or 1, 1))
+        end
+    end
+end
+
+--- What a vendor charges for one: the price seen at a merchant, else (when Questie lists a
+--- vendor for it) about 4x what a vendor pays, the usual markup. Returns price, estimated.
+function Prices.VendorBuy(id)
+    if not id then return nil end
+    local seen = merchantPrices()[id]
+    if seen then return seen, false end
+    local sold = ItemDB and ItemDB.vendors and ItemDB.vendors(id)
+    local sell = sold and #sold > 0 and Prices.VendorSell(id)
+    if sell then return sell * 4, true end
+end
 
 -- AHDB (Auction House DataBase, global AuctionDB) keeps a price history per auction house from
 -- its full scans. Its typical price is the median, over the last 30 days, of each day's lowest

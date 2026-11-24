@@ -518,7 +518,6 @@ AuctionFrame = { shown = false, IsShown = function(self) return self.shown end }
 Auctionator = { API = { v1 = {
     GetAuctionPriceByItemID = function(caller, id) assert(caller == "AskBot"); return ahPrices[id] end,
     GetAuctionAgeByItemID = function(_, id) return ahAges[id] end,
-    GetVendorPriceByItemID = function(_, id) return ({ [2320] = 10 })[id] end,
     RegisterForDBUpdate = function(_, fn) dbUpdated = fn end,
     MultiSearchExact = function(_, names)
         if not AuctionFrame.shown then error("Auction house is not open") end
@@ -1160,6 +1159,25 @@ bags[2996] = 1
 ask("mats for linen bag", "Open your profession window once")
 fire("TRADE_SKILL_SHOW")
 advance(1)
+-- What vendors charge: Auctionator's "vendor price" is what a vendor pays you, so AskBot records
+-- merchants' prices itself. Before a visit: ~4x what a vendor pays (2c) for an item Questie lists
+-- a vendor for; afterwards the merchant's price for one (5 for 50c), token items left out.
+do
+    local realInfo = C_Item.GetItemInfo
+    C_Item.GetItemInfo = function(id)
+        if id == 2320 then return "Coarse Thread", il(2320), 1, 5, 0, "Trade Goods", "Cloth", 20, "", 0, 2 end
+        return realInfo(id)
+    end
+    ask("price of " .. il(2320), "vendors sell it for ~8c", { "vendors sell it for 10c" })
+    local goods = { { 2320, 50, 5 }, { 2589, 0, 1, true } }
+    function GetMerchantNumItems() return #goods end
+    function GetMerchantItemID(i) return goods[i][1] end
+    function GetMerchantItemInfo(i) local g = goods[i]; return itemCache[g[1]], "icon", g[2], g[3], -1, true, true, g[4] end
+    AskBot.Prices.RecordMerchant()
+    assert(AskBotDB.vendorPrices[2320] == 10 and AskBotDB.vendorPrices[2589] == nil, "merchant prices recorded")
+    ask("price of " .. il(2320), "vendors sell it for 10c", { "~" })
+    C_Item.GetItemInfo = realInfo
+end
 ask("mats for 2 linen bag", { "[Linen Bag]|r x2 (Tailoring):", "  6 |cffffffff[Bolt of Linen Cloth]|r: have 1, buy 5",
     "(AH 4s each)", "  6 |cffffffff[Coarse Thread]|r: buy 6", "(vendor 10c each)", "To buy: 20s 60c",
     "sells for 50s each, so crafting saves 37s 70c each" })

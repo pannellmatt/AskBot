@@ -193,7 +193,9 @@ events:SetScript("OnEvent", function(_, event, ...)
     elseif event == "MERCHANT_SHOW" then
         -- Give Auctionator and the bag data a moment, then sell junk.
         C_Timer.After(0.3, function()
-            local ok, err = pcall(AskBot.Junk.OnMerchant)
+            local ok, err = pcall(AskBot.Prices.RecordMerchant)
+            if not ok and geterrorhandler then geterrorhandler()(err) end
+            ok, err = pcall(AskBot.Junk.OnMerchant)
             if not ok and geterrorhandler then geterrorhandler()(err) end
         end)
     elseif event == "LEARNED_SPELL_IN_TAB" then
