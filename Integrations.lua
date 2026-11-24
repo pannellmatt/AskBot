@@ -432,14 +432,20 @@ function Prices.BuyNote(id, price)
 end
 
 --- What the item can be expected to sell for on the AH: the lower of the latest price and the
---- typical one, so a brief spike doesn't look like profit. Returns price, typical, spiked
---- (the latest is well above the typical one).
+--- typical one, so a brief spike doesn't look like profit. Never more than a vendor sells it for:
+--- nobody buys at more (Small Lustrous Pearl: 2s at a vendor, 1700 listed, median 14s). Returns
+--- price, typical, spiked (the latest is well above the typical one), capped (at the vendor price).
 function Prices.Sale(id)
     local live = Prices.Available() and Prices.Auction(id) or nil
     local typical = Prices.Typical(id)
-    if not typical then return live end
-    if not live then return typical, typical end
-    return math.min(live, typical), typical, live > typical * 1.25
+    local sale, spiked = live, false
+    if typical then
+        sale = live and math.min(live, typical) or typical
+        spiked = live and live > typical * 1.25 or false
+    end
+    local vendor = Prices.Available() and Prices.VendorBuy(id)
+    if sale and vendor and vendor > 0 and sale > vendor then return vendor, typical, false, true end
+    return sale, typical, spiked
 end
 
 --- What a vendor pays you for the item (from the game's item info), or nil.
