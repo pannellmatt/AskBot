@@ -88,6 +88,9 @@ end
 
 local function classCanLearn(skill)
     local classFile = askerClass()
+    if Gear.ClassCanLearn and Gear.ClassCanLearn(classFile, skill) then return true end
+    local skills = Gear.Skills and Gear.Skills()
+    if skills and skills[skill] then return true end
     local can = Gear.WEAPONS and Gear.WEAPONS[classFile]
     if not can then return true end
     for sub, name in pairs(Gear.WEAPON_NAMES or {}) do
@@ -163,6 +166,16 @@ function WM.Record()
         end
     end
     if not next(found) then return end
+    AskBotDB = AskBotDB or {}
+    -- The window only lists what your class can learn: remember that per class, so gear and
+    -- junk checks know (e.g. axes for rogues on Forever).
+    local classFile = UnitClass and select(2, UnitClass("player"))
+    if classFile then
+        AskBotDB.classWeapons = AskBotDB.classWeapons or {}
+        local cw = AskBotDB.classWeapons[classFile] or {}
+        for s in pairs(found) do cw[s] = true end
+        AskBotDB.classWeapons[classFile] = cw
+    end
     -- With every filter on, the list is everything this trainer teaches.
     local filter = GetTrainerServiceTypeFilter
     local complete = filter and filter("available") and filter("unavailable") and filter("used") or false

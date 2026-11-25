@@ -207,6 +207,13 @@ local function itemInfoInstant(id)
     return equipLoc, classID, subclassID
 end
 
+--- Has a weapon master's window offered weapon skill `skill` to class `classFile`? (Recorded
+--- account-wide by WeaponMasters.Record.)
+function Gear.ClassCanLearn(classFile, skill)
+    local t = AskBotDB and AskBotDB.classWeapons and AskBotDB.classWeapons[classFile]
+    return t and t[skill] or false
+end
+
 --- Skills you have (weapon and armour skills included), or nil when unknown.
 function Gear.Skills()
     if AskBot.asker or not GetNumSkillLines or not GetSkillLineInfo then return nil end
@@ -255,8 +262,11 @@ function Gear.Check(id, classFile, level, skills, anyLevel)
         end
     elseif classID == 2 then
         local can = WEAPONS[classFile]
-        if not can or not can[sub] then return nil, nil, nil, WEAPON_NAMES[sub] or "that weapon type" end
         local skill = WEAPON_NAMES[sub]
+        -- Classic's rules, unless you've trained the skill or a weapon master offered it to
+        -- your class (servers like Forever let classes learn more).
+        local learnable = skill and ((skills and skills[skill]) or Gear.ClassCanLearn(classFile, skill))
+        if not learnable and (not can or not can[sub]) then return nil, nil, nil, skill or "that weapon type" end
         if skills and skill and not skills[skill] then needs = "train " .. skill end
     end
     return group, req, needs

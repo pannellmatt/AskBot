@@ -380,14 +380,16 @@ local function knownRecipe(name)
     end
 end
 
---- Price of one reagent: copper, and where ("AH" / "vendor"), or nil.
-local function reagentPrice(id)
+--- Price of one reagent: copper, and where ("AH" / "vendor"), or nil. `steady`: an AH mat at
+--- its usual price (from AHDB's history) rather than today's listing, when there's history.
+local function reagentPrice(id, steady)
     local P = AskBot.Prices
     if not id then return nil end
     local vendor = ItemDB.vendors and ItemDB.vendors(id)
     local vb = P and P.VendorBuy and P.VendorBuy(id)
     if vendor and #vendor > 0 and vb then return vb, "vendor" end
-    local ah = P and P.Available() and P.Auction(id)
+    local ah = P and P.Available() and P.Auction(id) or nil
+    if steady and P and P.Typical then ah = P.Typical(id) or ah end
     if ah then return ah, "AH" end
     if vendor and #vendor > 0 then return nil, "vendor" end
 end
@@ -425,24 +427,36 @@ local function answerMats(recipe, prof, count, ignoreHeld)
         end
         say(line)
     end
-    if haveAll then return say("  You have everything for " .. count .. ".") end
-    local summary = "  To buy: " .. (total > 0 and AskBot.Prices.Format(total) or "?") .. (unknown and total > 0 and "+" or "")
     local P = AskBot.Prices
     local sells, spiked
     if recipe.item then
         local typical
         sells, typical, spiked = P.Sale(recipe.item)
     end
-    if sells and total > 0 and not unknown then
-        local fullCost = 0
-        for _, r in ipairs(recipe.reagents) do fullCost = fullCost + (reagentPrice(r.id) or 0) * r.count end
+    -- Mats valued at full price (held ones too), against what the item sells for.
+    local fullCost, allPriced = 0, true
+    for _, r in ipairs(recipe.reagents) do
+        local price = reagentPrice(r.id)
+        if not price then allPriced = false end
+        fullCost = fullCost + (price or 0) * r.count
+    end
+    local function saleText()
         local perItem = fullCost / made
-        summary = summary .. ". On the AH it sells for " .. P.Format(sells) .. " each"
+        return "On the AH it sells for " .. P.Format(sells) .. " each"
             .. (spiked and (GREY .. " (usual price; listed at " .. P.Format(P.Auction(recipe.item)) .. " now)|r") or "")
             .. P.ThinNote(recipe.item) .. P.UnstableNote(recipe.item) .. ", "
             .. (sells > perItem and ("so crafting saves " .. P.Format(math.floor(sells - perItem)) .. " each")
                 or ("so buying it is " .. P.Format(math.floor(perItem - sells)) .. " cheaper each"))
     end
+    if haveAll then
+        local text = "  You have everything for " .. count .. "."
+        if sells and allPriced and fullCost > 0 then
+            text = text .. " Mats worth " .. P.Format(math.floor(fullCost / made)) .. " each. " .. saleText() .. "."
+        end
+        return say(text)
+    end
+    local summary = "  To buy: " .. (total > 0 and AskBot.Prices.Format(total) or "?") .. (unknown and total > 0 and "+" or "")
+    if sells and total > 0 and not unknown then summary = summary .. ". " .. saleText() end
     say(summary .. ".")
 end
 
@@ -562,21 +576,22 @@ local AH_CUT = AskBot.Junk.AH_CUT
 
 --- What a mat you already hold is worth to you: what you'd get selling it on the AH (after the
 --- cut), or what it costs from a vendor (you'd only buy it again). nil if neither is known.
-local function holdValue(id)
-    local price, source = reagentPrice(id)
-    if source == "AH" then return math.floor((AskBot.Prices.Sale(id) or price) * (1 - AH_CUT)) end
+local function holdValue(id, steady)
+    local price, source = reagentPrice(id, steady)
+    if source == "AH" then return math.floor(((not steady and AskBot.Prices.Sale(id)) or price) * (1 - AH_CUT)) end
     return price
 end
 
 --- One craft's mats: ones you hold at holdValue, the rest at the buy price. `stock` (item id ->
---- count) overrides your bags and bank. Returns cost, unknown (a mat to buy has no price), inBags.
-local function matsValue(reagents, stock)
+--- count) overrides your bags and bank; `steady` prices AH mats at their usual price. Returns
+--- cost, unknown (a mat to buy has no price), inBags.
+local function matsValue(reagents, stock, steady)
     local cost, unknown, inBags = 0, false, true
     for _, g in ipairs(reagents) do
         local have = stock and (stock[g.id] or 0) or bagCount(g.id, true)
         local held, buy = math.min(have, g.count), math.max(0, g.count - have)
         if buy > 0 then inBags = false end
-        local price, hv = reagentPrice(g.id), holdValue(g.id)
+        local price, hv = reagentPrice(g.id, steady), holdValue(g.id, steady)
         if held > 0 and hv then cost = cost + hv * held end
         if buy > 0 then
             if price then cost = cost + price * buy else unknown = true end
@@ -649,6 +664,17 @@ local function saleValue(item, made)
     if net then return net * (made or 1), "AH" end
 end
 
+--- What one craft brings back: `mode` "vendor" = what vendors pay (fixed, whatever the AH
+--- does); any other true value = the better of the AH (after its cut) and a vendor; nil = nil.
+local function craftSale(c, mode)
+    if not (mode and c.item) then return nil end
+    if mode == "vendor" then
+        local v = AskBot.Prices.VendorSell(c.item)
+        return v and v * (c.made or 1) or nil
+    end
+    return (saleValue(c.item, c.made))
+end
+
 --- Has a profession trainer window shown any of `prof`'s recipes? (Their costs are recorded.)
 local function trainerSeen(prof, trainCosts)
     for _, c in ipairs(AskBot.Crafts.byProf[prof] or {}) do
@@ -676,7 +702,8 @@ end
 local function planSkillUps(prof, rank, target, known, trainCosts, crafts, withProfit)
     local C = AskBot.Crafts
     local sales = 0
-    local function sale(c) return withProfit and saleValue(c.item, c.made) or 0 end
+    local steady = withProfit == "vendor"
+    local function sale(c) return craftSale(c, withProfit) or 0 end
     local stock, startStock, buy, learned = {}, {}, {}, {}
     local function have(id)
         if stock[id] == nil then stock[id] = bagCount(id, true); startStock[id] = stock[id] end
@@ -698,7 +725,7 @@ local function planSkillUps(prof, rank, target, known, trainCosts, crafts, withP
             local colour = C.Colour(c, skill)
             if (colour == "orange" or colour == "yellow") and (isKnown(c) or trainerTeaches(c, trainCosts, seen)) then
                 for _, g in ipairs(c.reagents) do have(g.id) end
-                local mats, unknown = matsValue(c.reagents, stock)
+                local mats, unknown = matsValue(c.reagents, stock, steady)
                 if not unknown then
                     local train = (isKnown(c) or learned[c]) and 0 or trainCost(c)
                     local perPoint = (mats - sale(c)) / craftChance(c, skill) + train / math.max(1, c.grey - skill)
@@ -719,7 +746,7 @@ local function planSkillUps(prof, rank, target, known, trainCosts, crafts, withP
             stock[g.id] = stock[g.id] - fromStock
             if need > fromStock then
                 buy[g.id] = (buy[g.id] or 0) + need - fromStock
-                cost = cost + (reagentPrice(g.id) or 0) * (need - fromStock)
+                cost = cost + (reagentPrice(g.id, steady) or 0) * (need - fromStock)
             end
         end
         local last = steps[#steps]
@@ -733,7 +760,7 @@ local function planSkillUps(prof, rank, target, known, trainCosts, crafts, withP
         local left = math.floor(stock[id] + 0.001)
         if left > 0 and n > 0 then spare[id] = left end
     end
-    return { steps = steps, buy = buy, cost = cost, spare = spare, reached = skill, sales = sales }
+    return { steps = steps, buy = buy, cost = cost, spare = spare, reached = skill, sales = sales, vendor = steady }
 end
 
 --- "Plan to 150: ~28 crafts, ~1g 20s to buy" + recipe ranges, what to buy, what's left to sell.
@@ -744,7 +771,10 @@ local function sayPlan(plan, target)
     say("  " .. GOLD .. "Plan to " .. plan.reached .. "|r"
         .. (plan.reached < target and (GREY .. " (then nothing orange or yellow I can price)|r") or "")
         .. ": ~" .. math.ceil(crafts - 0.001) .. " crafts, ~" .. AskBot.Prices.Format(math.floor(plan.cost)) .. " to buy"
-        .. (plan.sales > 0 and (", sell what you make for ~" .. AskBot.Prices.Format(math.floor(plan.sales))
+        .. (plan.vendor and plan.sales > 0 and (", ~" .. AskBot.Prices.Format(math.floor(plan.sales)) .. " back from vendors, "
+            .. (plan.sales >= plan.cost and ("|cff40ff40+" .. AskBot.Prices.Format(math.floor(plan.sales - plan.cost)) .. " net|r")
+                or ("~" .. AskBot.Prices.Format(math.floor(plan.cost - plan.sales)) .. " net"))) or "")
+        .. (not plan.vendor and plan.sales > 0 and (", sell what you make for ~" .. AskBot.Prices.Format(math.floor(plan.sales))
             .. (plan.sales >= plan.cost and (" |cff40ff40(+" .. AskBot.Prices.Format(math.floor(plan.sales - plan.cost)) .. ")|r")
                 or (GREY .. " (costs ~" .. AskBot.Prices.Format(math.floor(plan.cost - plan.sales)) .. ")|r"))) or ""))
     local parts = {}
@@ -760,7 +790,10 @@ local function sayPlan(plan, target)
     table.sort(list, function(a, b) return a.id < b.id end)
     if #list > 0 then
         local p = {}
-        for _, e in ipairs(list) do p[#p + 1] = e.n .. " " .. itemLinkText(e.id) end
+        for _, e in ipairs(list) do
+            local _, where = reagentPrice(e.id)
+            p[#p + 1] = e.n .. " " .. itemLinkText(e.id) .. (where == "AH" and AskBot.Prices.UnstableNote(e.id) or "")
+        end
         say("    Buy: " .. table.concat(p, ", "))
     end
     local spare, value = {}, 0
@@ -887,9 +920,9 @@ local function answerSkillUp(prof, withProfit)
                 colour = nil
             end
             if colour == "orange" or colour == "yellow" then
-                local cost, unknown, inBags = matsValue(c.reagents)
-                -- "with profit": what the craft sells for comes off its cost.
-                local sale = withProfit and c.item and saleValue(c.item, c.made) or nil
+                local cost, unknown, inBags = matsValue(c.reagents, nil, withProfit == "vendor")
+                -- "with profit" / "vendor": what the craft sells for comes off its cost.
+                local sale = craftSale(c, withProfit)
                 local how = (name and known[D.NameKey(name)]) and 1 or (c.recipe and 3 or 2)
                 -- A trainer recipe you haven't learned: add what it costs to train (once a profession
                 -- trainer window has shown it), so it ranks fairly against the ones you know.
@@ -917,7 +950,8 @@ local function answerSkillUp(prof, withProfit)
         end)
         local atCap = p and p.max and rank >= p.max
         say(prof .. " " .. rank .. (p and p.max and ("/" .. p.max) or "") .. ": cheapest skill-ups"
-            .. (withProfit and (GREY .. " (counting what you can sell them for)|r") or "")
+            .. (withProfit == "vendor" and (GREY .. " (vendoring what you make; AH mats at their usual price)|r")
+                or withProfit and (GREY .. " (counting what you can sell them for)|r") or "")
             .. (atCap and (" |cffff8040(at your cap: train the next rank)|r " .. trainerLink(prof)) or "") .. ":")
         if #list == 0 then say(GREY .. "  Nothing orange or yellow at " .. rank .. ".|r") end
         local COLOUR = { orange = "|cffff8040orange|r", yellow = "|cffffff00yellow|r" }
@@ -927,7 +961,7 @@ local function answerSkillUp(prof, withProfit)
             local cost = matsLabel(e)
             if e.sale then
                 local net = e.sale - e.cost
-                cost = cost .. ", sells " .. AskBot.Prices.Format(e.sale) .. " "
+                cost = cost .. (withProfit == "vendor" and ", vendors " or ", sells ") .. AskBot.Prices.Format(e.sale) .. " "
                     .. (net >= 0 and ("|cff40ff40(+" .. AskBot.Prices.Format(net) .. ")|r")
                         or (GREY .. "(-" .. AskBot.Prices.Format(-net) .. ")|r"))
             end
@@ -1119,11 +1153,25 @@ local function skillUpProfession(q)
     if not others and padded:find(" cheapest ", 1, true) then return (professionNamed(q)) end
 end
 
---- "level [Blacksmithing] with profit": the profession, for skill-ups that count what crafts sell for.
+-- "level blacksmithing vendor": skill-ups that vendor what you make (needs a levelling word, as
+-- "blacksmithing vendor" alone could be a merchant).
+local VENDOR_ENDINGS = { " and vendor what i make", " and vendor everything", " and vendor it", " and vendor them",
+    " and vendor", " vendoring everything", " vendoring it", " vendoring them", " vendoring", " by vendoring",
+    " to vendor", " for vendor", " for vendoring", " for vendors", " selling to vendors", " selling to vendor",
+    " sell to vendor", " sell to vendors", " with vendoring", " vendor everything", " vendor it", " vendor" }
+
+--- "level [Blacksmithing] with profit" / "... vendor": the profession, and the mode (true =
+--- count what crafts sell for; "vendor" = what vendors pay, with AH mats at their usual price).
 local function withProfitProfession(q)
+    for _, w in ipairs(VENDOR_ENDINGS) do
+        if q:sub(-#w) == w then
+            local prof = skillUpProfession(q:sub(1, -#w - 1))
+            if prof then return prof, "vendor" end
+        end
+    end
     local base = q:gsub(" with profits?$", ""):gsub(" profitably$", ""):gsub(" and profit$", "")
     if base == q then return nil end
-    return skillUpProfession(base) or professionNamed(base)
+    return skillUpProfession(base) or professionNamed(base), true
 end
 
 --- Is `q` a profession question that needs your own recipes or skills? (For "!ask".)
@@ -1149,8 +1197,8 @@ end
 
 --- Answers profession questions; returns true if it did.
 local function professionQuestion(q, isServiceQuestion)
-    local withProfit = withProfitProfession(q)
-    if withProfit then answerSkillUp(withProfit, true); return true end
+    local withProfit, mode = withProfitProfession(q)
+    if withProfit then answerSkillUp(withProfit, mode); return true end
     local forProfit = profitProfession(q)
     if forProfit then answerProfit(forProfit); return true end
     -- Skill-ups need a profession named.
@@ -1227,6 +1275,30 @@ local function professionQuestion(q, isServiceQuestion)
         end
     end
     return false
+end
+
+--- A recipe shift-clicked from a profession window, "[Blacksmithing: Bronze Shortsword]" (a
+--- link, or the same typed in brackets), as the question to answer: "mats for X" (what you
+--- hold, the cost and the AH profit), "mats for 3 X", "... from scratch", or "recipe for X"
+--- when the words around it ask where to learn it. nil if there's no such link.
+function Professions.craftLinkQuestion(question)
+    local text = question:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+    local s, e, prof, name = text:find("%[([%a ]+): ([^%]]+)%]")
+    if not s then return nil end
+    local craft = false
+    for _, p in ipairs(PROFESSIONS) do
+        if p.craft and p[1]:lower() == prof:lower() then craft = true end
+    end
+    if not craft then return nil end
+    local rest = (text:sub(1, s - 1) .. " " .. text:sub(e + 1)):gsub("|H.-|h.-|h", " "):gsub("|H[^|]*|h", " "):gsub("|h", " ")
+    rest = " " .. rest:lower():gsub("[^%w ]", " "):gsub("%s+", " ") .. " "
+    name = name:gsub("^%s+", ""):gsub("%s+$", "")
+    for _, w in ipairs({ " recipe ", " pattern ", " plans ", " learn ", " teaches ", " teach ", " where ", " when " }) do
+        if rest:find(w, 1, true) then return "recipe for " .. name end
+    end
+    local count = tonumber(rest:match(" x? ?(%d+) "))
+    local _, ignoreHeld = stripIgnoreHeld((rest:gsub("%s+$", "")))
+    return "mats for " .. (count and count > 1 and (count .. " ") or "") .. name .. (ignoreHeld and " from scratch" or "")
 end
 
 -- For the files loaded after this one.

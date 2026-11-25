@@ -570,6 +570,7 @@ local function ask(q, expect, reject)
     for _, r in ipairs(reject or {}) do
         if text:find(r, 1, true) then failures = failures + 1; print("   !! FAIL: did not expect " .. r) end
     end
+    return text
 end
 
 ask("status", "ready")
@@ -1155,6 +1156,21 @@ fire("TRAINER_SHOW")
 advance(1)
 ask("weapon master for guns", { "Weapon Master for Guns:", "Ember Bladewhisper" }, { "Not known yet" })
 ask("nearest weapon master", "Guns, Maces")
+-- ...and what it offers your class counts as usable gear, even against Classic's rules.
+if not (AskBotDB.classWeapons and AskBotDB.classWeapons.WARRIOR and AskBotDB.classWeapons.WARRIOR.Guns) then
+    failures = failures + 1; print("   !! FAIL: weapon master's skills not recorded for the class")
+end
+do
+    gear[9198] = { "Test Wand", "INVTYPE_RANGEDRIGHT", 2, 19, 5, 8, { ITEM_MOD_DAMAGE_PER_SECOND_SHORT = 2 }, true }
+    local g1, _, _, cannot = AskBot.Gear.Check(9198, "WARRIOR", 20, AskBot.Gear.Skills(), true)
+    AskBotDB.classWeapons.WARRIOR.Wands = true
+    local g2, _, needs = AskBot.Gear.Check(9198, "WARRIOR", 20, AskBot.Gear.Skills(), true)
+    AskBotDB.classWeapons.WARRIOR.Wands = nil
+    if g1 or cannot ~= "Wands" or g2 ~= "ranged" or needs ~= "train Wands" then
+        failures = failures + 1; print("   !! FAIL: class-learnable weapon check: " .. tostring(g1) .. " " .. tostring(cannot) .. " " .. tostring(g2) .. " " .. tostring(needs))
+    end
+    gear[9198] = nil
+end
 UnitGUID = realGuid
 GetNumTrainerServices = nil
 
@@ -1208,6 +1224,17 @@ ask("mats for 2 linen bag", { "[Linen Bag]|r x2 (Tailoring):", "  6 |cffffffff[B
     "(AH 4s each)", "  6 |cffffffff[Coarse Thread]|r: buy 6", "(vendor 10c each)", "To buy: 20s 60c",
     "sells for 50s each, so crafting saves 37s 70c each" })
 ask("what do i need to make brown linen pants", { "Brown Linen Pants", "have 1, buy 1" })
+-- A recipe shift-clicked from the profession window: mats, cost and profit.
+local craftLink = "|cffffd000|Henchant:3755|h[Tailoring: Linen Bag]|h|r"
+ask(craftLink, { "[Linen Bag]|r (Tailoring):", "have 1, buy 2", "sells for 50s each, so crafting saves" })
+ask(craftLink .. " x2", { "[Linen Bag]|r x2 (Tailoring):", "have 1, buy 5" })
+ask(craftLink .. " from scratch", { "buying everything", "[Bolt of Linen Cloth]|r: buy 3" }, { "have 1" })
+ask("[Tailoring: Linen Bag]", "[Linen Bag]|r (Tailoring):")
+ask("recipe " .. craftLink, { "You already know", "(Tailoring)" })
+-- Holding every mat still shows the profit.
+bags[2996], bags[2320] = 3, 3
+ask(craftLink, { "You have everything for 1. Mats worth 12s 30c each. On the AH it sells for 50s each, so crafting saves 37s 70c each." })
+bags[2996], bags[2320] = 1, nil
 ask("cost to craft " .. il(4238), { "[Linen Bag]|r", "To buy: ", "sells for 50s each" })
 ask("how much does it cost to craft linen bag", { "[Linen Bag]|r", "To buy: " })
 -- "from scratch": the bolt in your bags is bought too (3 x 4s + 3 x 10c).
@@ -1358,6 +1385,34 @@ do
         "sell what you make for ~" }, { "for profit" })
     ask("|cffffd000|Htrade:Player-1:2018:165|h[Leatherworking]|h|r skill ups profitably", "counting what you can sell them for")
     ask("how do i level leatherworking", "Leatherworking 35/75: cheapest skill-ups", { "counting what", "sells 19s" })
+    -- Levelling by vendoring: only what vendors pay counts (Boots 25c, Pants 3s), so the Pants
+    -- (mats 3s 90c, free to train here) now beat the Boots (mats 2s) that win on AH prices.
+    local pantsKey = AskBot.Data.NameKey("Handstitched Leather Pants")
+    local pantsTraining = AskBotDB.recipeTraining[pantsKey]
+    AskBotDB.recipeTraining[pantsKey] = 0
+    local itemInfo = C_Item.GetItemInfo
+    local vendorPays = { [2302] = 25, [2303] = 300 }
+    C_Item.GetItemInfo = function(id)
+        if vendorPays[id] then return itemCache[id], nil, 1, 10, 5, "Armor", "Leather", 1, "", 0, vendorPays[id] end
+        return itemInfo(id)
+    end
+    local vendorText = ask("level leatherworking vendor", { "Leatherworking 35/75: cheapest skill-ups",
+        "(vendoring what you make; AH mats at their usual price)", "vendors 3s", "vendors 25c",
+        "back from vendors, ~", " net", "35-60 |cffffffff[Handstitched Leather Pants]|r x31" },
+        { "sells 19s", "sell what you make for" })
+    if not (vendorText:find("Pants]", 1, true) < vendorText:find("Boots]", 1, true)) then
+        failures = failures + 1; print("   !! FAIL: vendoring should rank the Pants first")
+    end
+    ask("how do i level leatherworking and vendor everything", "(vendoring what you make")
+    -- With AHDB history, AH mats count at their usual price (Light Leather 2s, not 1s today).
+    AuctionDB = { PlayerHouse = function() return "Alliance" end,
+        Typical = function(_, id) if id == 2318 then return 200, 250, 5 end return 0, 0, 0 end }
+    ask("level leatherworking vendor", "[Handstitched Leather Boots]|r |cffff8040orange|r - mats 3s 90c, vendors 25c")
+    ask("level leatherworking with profit", "[Handstitched Leather Boots]|r |cffff8040orange|r - mats 2s, sells")
+    AuctionDB = nil
+    ask("leatherworking vendor", nil, { "cheapest skill-ups" })
+    C_Item.GetItemInfo = itemInfo
+    AskBotDB.recipeTraining[pantsKey] = pantsTraining
     -- Embossed Leather Boots with no recipe item and not on your trainer's list (Forever's
     -- Sterling Silver Boots): left out of profit and skill-ups even when you could make them.
     ahPrices[2309], ahAges[2309] = 9000, 0
@@ -1465,7 +1520,8 @@ end
 do
     local from = #output + 1
     fire("ZONE_CHANGED_NEW_AREA")
-    advance(3)
+    advance(1)
+    advance(2)
     local text = withPlainQuestLinks(table.concat(output, "\n", from))
     for _, e in ipairs({ "Rare here: |cffffd100Foreman Grills|r (21 elite) can drop", "[Grills' Girdle]",
         "for your empty waist slot", "[pin]" }) do
@@ -1475,7 +1531,8 @@ do
     end
     from = #output + 1
     fire("ZONE_CHANGED_NEW_AREA")
-    advance(3)
+    advance(1)
+    advance(2)
     if #output >= from then failures = failures + 1; print("   !! FAIL: rare alert repeated") end
     AskBot.SetOption("rareAlerts", false)
 end
@@ -1503,7 +1560,8 @@ do
     hbd.GetPlayerWorldPosition = function() return 3370, 440, 1 end           -- Darkshore 37, 44
     C_Map.GetBestMapForUnit = function() return 1439 end
     fire("UNIT_SPELLCAST_SUCCEEDED", "player", "cast-1", 8690)
-    advance(3)
+    advance(1)
+    advance(2)
     hbd.GetPlayerWorldPosition, C_Map.GetBestMapForUnit = pos, best
     ask("hearth", { "Hearthstone: |cffffd100Auberdine|r (Darkshore), |cff40ff40ready|r", "[pin]" })
     ask("where is auberdine quester", "hearth to Auberdine", { "boat" })
@@ -1671,6 +1729,31 @@ do
     advance(1)
     if soldIds[1] ~= 9019 then failures = failures + 1; print("   !! FAIL: off-spec leggings kept with the setting off") end
     AskBotDB.junkOffSpec = nil
+    -- An outgrown dagger you haven't trained Daggers for: kept (you'll skill up with it). Once
+    -- Daggers is trained, it's outgrown junk again.
+    gear[9197] = { "Dull Dagger", "INVTYPE_WEAPON", 2, 15, 5, 8, { ITEM_MOD_DAMAGE_PER_SECOND_SHORT = 1 }, true }
+    itemCache[9197], junkInfo[9197] = "Dull Dagger", { 1, 30 }
+    slots, soldIds = { 9197 }, {}
+    fire("MERCHANT_SHOW")
+    advance(1)
+    if soldIds[1] then failures = failures + 1; print("   !! FAIL: sold a weapon whose skill isn't trained") end
+    skillLines[#skillLines + 1] = { "Daggers", false, 1 }
+    slots, soldIds = { 9197 }, {}
+    -- It's damaged, so the vendor pays 25c, not its listed 30c: the message says what came in.
+    local wallet, use = 1000, C_Container.UseContainerItem
+    GetMoney = function() return wallet end
+    C_Container.UseContainerItem = function(b, s) wallet = wallet + 25; use(b, s) end
+    local moneyFrom = #output + 1
+    fire("MERCHANT_SHOW")
+    advance(1)
+    advance(2)
+    if soldIds[1] ~= 9197 then failures = failures + 1; print("   !! FAIL: outgrown trained dagger kept") end
+    if not table.concat(output, "\n", moneyFrom):find("Sold 1 junk item for 25c", 1, true) then
+        failures = failures + 1; print("   !! FAIL: sale message didn't use the money received")
+    end
+    GetMoney, C_Container.UseContainerItem = nil, use
+    table.remove(skillLines)
+    gear[9197] = nil
     C_Container.GetContainerItemInfo = function(_, slot) return slots[slot] and { stackCount = 1, isLocked = false } end
     gear[9193], gear[9194] = nil, nil
     -- Turned off: nothing sells.

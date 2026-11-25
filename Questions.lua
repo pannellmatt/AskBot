@@ -245,6 +245,9 @@ local SPECIAL_ANSWERS = {
 }
 
 local function answer(question)
+    -- A recipe from a profession window, "[Blacksmithing: Bronze Shortsword]": mats and profit.
+    local craftQ = AskBot.Professions.craftLinkQuestion(question)
+    if craftQ then return answer(craftQ) end
     -- Shift-clicked item or quest links carry their IDs.
     local itemId = question:match("|Hitem:(%d+)")
     local questId = question:match("|Hquest:(%d+)") or question:match("|Hquestie:(%d+)")

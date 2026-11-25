@@ -92,6 +92,9 @@ local function junkReason(id, quality, ctx)
         if not r.group then
             return (r.cannot and r.cannot ~= "") and "unusable" or nil
         end
+        -- A weapon (or shield, mail, plate) whose skill you haven't trained yet: kept, it's
+        -- what you'll level the skill with once you train it.
+        if r.needs and r.needs:find("^train ") then return nil end
         local wearing = r.currentLink and r.currentLink:find("item:" .. id .. ":", 1, true)
         if wearing or not (r.score and r.gain) or beatsWorn(r) then return nil end
         req = req or r.req
@@ -168,6 +171,7 @@ local function sellBatch(list)
     if not use then return end
     local sold, money = 0, 0
     local rest = {}
+    local before = GetMoney and GetMoney()
     for _, e in ipairs(list) do
         if sold < Junk.BUYBACK and itemId(e.bag, e.slot) == e.id then
             use(e.bag, e.slot)
@@ -177,7 +181,14 @@ local function sellBatch(list)
         end
     end
     if sold > 0 then
-        say("Sold " .. sold .. " junk item" .. (sold == 1 and "" or "s") .. " for " .. AskBot.Prices.Format(money) .. ".")
+        local function report()
+            -- What actually came in (damaged gear sells for less than its listed price), else
+            -- the listed price when the money hasn't shown up.
+            local got = before and GetMoney and GetMoney() - before
+            if got and got > 0 then money = got end
+            say("Sold " .. sold .. " junk item" .. (sold == 1 and "" or "s") .. " for " .. AskBot.Prices.Format(money) .. ".")
+        end
+        if before and C_Timer and C_Timer.After then C_Timer.After(1.5, report) else report() end
     end
     if #rest > 0 then
         say("  " .. #rest .. " more for " .. AskBot.Prices.Format(total(rest, 1, #rest)) .. GREY .. " (buyback holds "
