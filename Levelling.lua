@@ -73,12 +73,10 @@ local function answerQuestLog()
 end
 
 --- Quests you could pick up: right level, not grey, not already in your log, and doable
---- by Questie's own checks (completed, prerequisites, class, reputation, events...).
---- `level` defaults to yours; for another level, a simple grey-quest rule replaces Questie's.
+--- by Questie's own checks when it runs, else ours (completed, prerequisites, class, reputation...).
+--- `level` defaults to yours; for another level, a simple grey-quest rule replaces the game's.
 local function doableQuests(level)
-    local QuestieDBModule = QuestieLoader and QuestieLoader:ImportModule("QuestieDB")
-    local isDoable = QuestieDBModule and QuestieDBModule.IsDoable
-    local isTrivial = QuestieDBModule and QuestieDBModule.IsTrivial
+    local isDoable, isTrivial = AskBot.Compat.IsDoable, AskBot.Compat.IsTrivial
     local myLevel = askerLevel()
     level = level or myLevel
     local inLog = {}
@@ -153,9 +151,7 @@ local function explainCurrentZone(level)
     local mapId = currentZoneMap()
     if not mapId then return say(GREY .. "(I can't tell which zone you're in.)|r") end
 
-    local QuestieDBModule = QuestieLoader and QuestieLoader:ImportModule("QuestieDB")
-    local isDoable = QuestieDBModule and QuestieDBModule.IsDoable
-    local isTrivial = QuestieDBModule and QuestieDBModule.IsTrivial
+    local isDoable, isTrivial = AskBot.Compat.IsDoable, AskBot.Compat.IsTrivial
     local isCompleted = (C_QuestLog and C_QuestLog.IsQuestFlaggedCompleted) or IsQuestFlaggedCompleted
     local inLog = {}
     for _, q in ipairs(questLogEntries()) do inLog[q.id] = true end
@@ -164,7 +160,7 @@ local function explainCurrentZone(level)
     local labels = {
         counted = "counted", done = "already done", inLog = "in your log", tooHigh = "need a higher level",
         grey = "too easy (grey)", hostile = "from NPCs hostile to you",
-        unavailable = "not available yet (Questie: prerequisites, class, reputation...)",
+        unavailable = "not available yet (prerequisites, class, reputation...)",
     }
     local buckets, total = {}, 0
     for _, k in ipairs(order) do buckets[k] = {} end
@@ -209,11 +205,10 @@ end
 -- New quests count towards a zone when their level is within this many levels of yours.
 local ZONE_LEVELS = 2
 
---- XP a quest is worth for ranking zones: Questie's XP, or a flat 1000 when Questie has no
---- XP table. nil when Questie says it gives none.
+--- XP a quest is worth for ranking zones: QuestieDB's XP, or a flat 1000 when there's no
+--- XP table. nil when the table says it gives none.
 local function hasXPTable()
-    local QuestXP = QuestieLoader and QuestieLoader:ImportModule("QuestXP")
-    return QuestXP ~= nil and QuestXP.GetQuestLogRewardXP ~= nil
+    return AskBot.Compat.HasXPTable() or AskBot.Compat.QuestieModule("QuestXP") ~= nil
 end
 local function rankXP(id)
     local xp = questXP(id)
@@ -517,15 +512,10 @@ local function answerPlan()
     if first then autoPin(first.place, first.spawn, first.place.name) end
 end
 
---- Too easy to be worth much XP: Questie's grey rule, else 8+ levels below you.
+--- Too easy to be worth much XP: the game's grey rule for your level.
 local function questIsGrey(level)
     if not level or level <= 0 then return false end
-    local QuestieDBModule = QuestieLoader and QuestieLoader:ImportModule("QuestieDB")
-    if QuestieDBModule and QuestieDBModule.IsTrivial then
-        local ok, trivial = pcall(QuestieDBModule.IsTrivial, level)
-        if ok then return trivial == true end
-    end
-    return level < askerLevel() - 7
+    return AskBot.Compat.IsTrivial(level)
 end
 
 --- The game's quest tag: "Elite", "Dungeon", "Raid", "Group", "PvP"... or nil.

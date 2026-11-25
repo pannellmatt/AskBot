@@ -18,12 +18,10 @@ local dropRateNoteShown = false
 -- Answers
 --------------------------------------------------------------------------------------------
 
---- XP quest `id` gives you (Questie's Forever XP table, scaled to your level), or nil.
+--- XP quest `id` gives you (QuestieDB's Forever XP table, scaled to your level), or nil.
 local function questXP(id)
-    local QuestXP = QuestieLoader and QuestieLoader:ImportModule("QuestXP")
-    if not (QuestXP and QuestXP.GetQuestLogRewardXP) then return nil end
-    local ok, xp = pcall(QuestXP.GetQuestLogRewardXP, QuestXP, id)
-    return ok and type(xp) == "number" and xp > 0 and xp or nil
+    local ok, xp = pcall(AskBot.Compat.QuestXP, id)
+    return ok and xp or nil
 end
 
 local function friendlyPlaces(list)
@@ -328,7 +326,7 @@ end
 --------------------------------------------------------------------------------------------
 
 local function questieComms()
-    local comms = QuestieLoader and QuestieLoader:ImportModule("QuestieComms")
+    local comms = AskBot.Compat.QuestieModule("QuestieComms")
     return comms and comms.GetQuest and comms or nil
 end
 
@@ -919,12 +917,7 @@ local function questStatus(id, inLog)
     if isCompleted and isCompleted(id) then return "done" end
     if inLog[id] then return "inLog" end
     if (QuestDB.requiredLevel(id) or 0) > askerLevel() then return "level" end
-    local QuestieDBModule = QuestieLoader and QuestieLoader:ImportModule("QuestieDB")
-    if QuestieDBModule and QuestieDBModule.IsDoable then
-        local ok, doable = pcall(QuestieDBModule.IsDoable, id)
-        if ok and doable then return "ready" end
-    end
-    return "locked"
+    return AskBot.Compat.IsDoable(id) and "ready" or "locked"
 end
 
 --- Could this character ever take the quest? (Race rules, and a giver that isn't hostile.)

@@ -299,7 +299,7 @@ local function answer(question)
         if #places == 0 then return say(GREY .. "Nothing to put on the map for that.|r") end
         local MAX = 200
         local n = showOnMap(places, showAll, MAX)
-        if not n then return say("I need HereBeDragons (it comes with Questie) to put icons on the map.") end
+        if not n then return say("I need HereBeDragons to put icons on the map.") end
         local total = 0
         for _, p in ipairs(places) do total = total + #(p.spawns or {}) end
         return say("Put " .. n .. " icon" .. (n == 1 and "" or "s") .. " on your map" .. (total > n and (" (first " .. n .. " of " .. total .. ")") or "")
@@ -468,7 +468,7 @@ function AskBot.Ask(msg)
         say("I'm not working right now; see the earlier error message.")
     else
         Out.pendingQuestion = msg
-        say(string.format("Still reading Questie's data (%d%%), I'll answer in a moment.",
+        say(string.format("Still reading QuestieDB's data (%d%%), I'll answer in a moment.",
             math.floor(D.progress * 100)))
     end
 end

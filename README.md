@@ -129,7 +129,7 @@ With **AHDB** (Auction House DataBase) installed too, AskBot uses its price hist
 - `/ab where is my party` (or `where is everyone`): where each group member is, nearest first, with travel time and a pin.
 - `/ab where is Buddy`: one group member. For a guild member outside your group, the zone they're in (the game only gives addons exact positions for group members).
 - Friends can ask too: `!ask where is my party member` answers from where *they* are.
-- `/ab who has Red Linen Goods` (or `who needs …`): your progress and each group member's on a quest. Quest answers also add a "Group:" line when someone in your group has the quest. This uses Questie's party sync, so it only covers members who run Questie.
+- `/ab who has Red Linen Goods` (or `who needs …`): your progress and each group member's on a quest. Quest answers also add a "Group:" line when someone in your group has the quest. This uses Questie's party sync, so it needs Questie installed and only covers members who run it.
 
 You don't have to type names exactly. Lower case, missing apostrophes and partial names all work. When AskBot isn't sure what you meant, it offers clickable "Did you mean" suggestions.
 
@@ -185,7 +185,9 @@ Thor <Gryphon Master> - Westfall 56.6, 52.6 (71 yds, <1 min)
 
 | Addon | Required? | What it adds |
 |---|---|---|
-| **Questie** (with QuestieDB) | **Required** | All NPC, quest and item locations |
+| **QuestieDB** | **Required** | All NPC, quest and item locations |
+| **HereBeDragons** | **Required** | Map coordinates and distances |
+| Questie | Optional | Hides quests Questie knows are unavailable; group quest progress |
 | TomTom | Optional | Waypoint arrow |
 | AtlasLoot (Forever) | Optional | Boss loot tables, drop rates, dungeon gear |
 | Auctionator | Optional | Auction house prices |

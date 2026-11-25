@@ -1,9 +1,9 @@
 AskBot - install
 ================
 
-1. Make sure Questie is installed for WoW Forever (AskBot needs it).
-   Optional extras: TomTom (waypoint arrow), AtlasLoot Forever (loot and drop
-   rates), Auctionator (prices).
+1. AskBot needs two other addons for WoW Forever: QuestieDB and HereBeDragons.
+   Optional extras: Questie (better quest filtering, group progress), TomTom
+   (waypoint arrow), AtlasLoot Forever (loot and drop rates), Auctionator (prices).
 
 2. Unzip this file into:
      World of Warcraft\_forever_\Interface\AddOns\

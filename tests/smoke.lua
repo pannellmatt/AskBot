@@ -385,22 +385,31 @@ LibQuestieDB = {
         npcFlags = { QUEST_GIVER = 2, VENDOR = 4, FLIGHT_MASTER = 8, TRAINER = 16, INNKEEPER = 128,
             BANKER = 256, AUCTIONEER = 4096, STABLEMASTER = 8192, REPAIR = 16384 },
         factionRaceMasks = { Alliance = 1, Horde = 2 },
+        classKeys = { WARRIOR = 1, PALADIN = 2, HUNTER = 4 },
     },
 }
 Questie = { started = true }
 -- Questie's party sync: quest id -> { player name -> objectives }, and players who sent data
 local remoteLogs, remoteClasses = {}, {}
--- Questie's quest XP (already scaled to your level)
-local questXp = { [100] = 2000, [103] = 900, [105] = 1050, [109] = 840, [110] = 1200, [104] = 1100, [111] = 1400,
+-- QuestieDB's quest XP: { quest level, base XP }; level 60 so it isn't scaled down for you.
+local questXp = { [100] = 2000, [103] = 900, [105] = 1050, [109] = 850, [110] = 1200, [104] = 1100, [111] = 1400,
     [112] = 1500, [113] = 1700, [120] = 1400, [121] = 1500, [122] = 1600 }
+local xpDb = setmetatable({}, { __index = function(_, id) return questXp[id] and { 60, questXp[id] } end })
+-- QuestieDB's support tables (zone maps ship as Lua source, as in the real data)
+local areaSource = {}
+for a, m in pairs(areaToMap) do areaSource[#areaSource + 1] = "[" .. a .. "]=" .. m end
+local supportData = {
+    ZoneDB = { private = { areaIdToUiMapId = "return {" .. table.concat(areaSource, ",") .. "}",
+        areaIdToUiMapIdOverride = "return { [0] = 0 }",
+        dungeons = { [1581] = { "The Deadmines", {}, W, { { W, 42.6, 71.8 } } } } } },
+    QuestXP = { db = xpDb },
+}
+LibQuestieDB.Support = { Get = function(name) return supportData[name] end }
+-- Questie's own modules: its quest check and party sync (all AskBot still takes from Questie)
 QuestieLoader = { ImportModule = function() return {
-    GetQuestLogRewardXP = function(_, id) return questXp[id] or 0 end,
     GetQuest = function(_, id) return remoteLogs[id] end,
     remotePlayerClasses = remoteClasses,
     IsDoable = function(id) return doable[id] == true end,
-    IsTrivial = function(level) return level ~= nil and level < 20 - 8 end,
-    GetUiMapIdByAreaId = function(_, a) return areaToMap[a] end,
-    GetDungeons = function() return { [1581] = { "The Deadmines", {}, W, { { W, 42.6, 71.8 } } } } end,
 } end }
 
 -- Game item cache: names for gear Questie doesn't know; 2589 has a link and vendor price.
@@ -863,7 +872,7 @@ do
     C_QuestLog.GetInfo, C_QuestLog.GetNumQuestLogEntries, C_QuestLog.GetQuestTagInfo = savedInfo, savedNum, nil
 end
 ask("tidy quest log", { "Quest log: 3 of 20. Could drop:", "Grey (little XP): " }, { "Need a group", "Far away" })
-ask("zones for level 14", { "Where to quest at level 14:", "Westfall|r: 2 yours + 3 new, lvl 10-18, 5990 xp" },
+ask("zones for level 14", { "Where to quest at level 14:", "Westfall|r: 2 yours + 3 new, lvl 10-18, 6000 xp" },
     { "Too Easy" })
 ask("which region should i level in now", { "Where to quest at level 20:", "Redridge Mountains|r: 1 yours + 3 new" })
 ask("best place to level", "Where to quest at level 20:")
@@ -975,6 +984,23 @@ ask("what comes after done earlier", { "After ", "[13] After Done|r - pick up fr
 ask("what do i need before done earlier", "You've already done")
 ask("what comes after chain part 3", "Nothing follows")
 for _, id in ipairs({ 130, 133, 136, 137 }) do doable[id] = nil end
+
+-- Without Questie: AskBot's own quest check gives the same chain answers.
+Questie.started = false
+ask("what do i need before chain part 3", { "1. |cffffd100[14] Chain Part 1|r - pick up from |cffffd100Chain Giver",
+    "3. |cffffd100[15] Side Errand|r - pick up from" }, { "Horde Version" })
+ask("what comes after done earlier", "[13] After Done|r - pick up from |cffffd100Chain Giver")
+local Compat = AskBot.Compat
+for id, want in pairs({ [130] = true, [131] = false, [132] = false, [135] = false, [136] = true,
+    [145] = false, [146] = true }) do
+    if Compat.IsDoable(id) ~= want then
+        failures = failures + 1; print("   !! FAIL: own IsDoable(" .. id .. ") should be " .. tostring(want))
+    end
+end
+if Compat.QuestXP(109) ~= 850 or Compat.UiMapIdByAreaId(W) ~= 1436 or not Compat.IsTrivial(10) or Compat.IsTrivial(15) then
+    failures = failures + 1; print("   !! FAIL: Compat XP, zone map or grey quests")
+end
+Questie.started = true
 
 -- Gathering
 ask("where can i mine copper", { "Copper Vein|r <", "Mining 1|r> - Westfall 40.0, 50.0", "Most nodes:|r Dun Morogh 3",

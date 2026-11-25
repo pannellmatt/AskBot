@@ -30,10 +30,10 @@ local D = {
 }
 AskBot.Data = D
 
-local HBD, ZoneDB, flagValues
+local HBD, flagValues
 
-function D.Init(hbd, zoneDB, flags)
-    HBD, ZoneDB, flagValues = hbd, zoneDB, flags
+function D.Init(hbd, flags)
+    HBD, flagValues = hbd, flags
 end
 
 --------------------------------------------------------------------------------------------
@@ -156,7 +156,7 @@ local mapCache = {}
 local function uiMapFor(areaId)
     local m = mapCache[areaId]
     if m == nil then
-        local ok, r = pcall(ZoneDB.GetUiMapIdByAreaId, ZoneDB, areaId)
+        local ok, r = pcall(AskBot.Compat.UiMapIdByAreaId, areaId)
         m = (ok and type(r) == "number" and r > 0) and r or false
         mapCache[areaId] = m
     end
@@ -168,13 +168,13 @@ function D.ZoneName(uiMapId)
     return info and info.name or ("map " .. uiMapId)
 end
 
--- Dungeons by area ID (main and alternative IDs), from Questie's dungeon table.
+-- Dungeons by area ID (main and alternative IDs), from QuestieDB's dungeon table.
 -- Each entry: { name, areaId, areaIds = { main and alternatives }, entrances }.
 local dungeonByArea, dungeonNames
 local function loadDungeons()
     if dungeonByArea then return end
     dungeonByArea, dungeonNames = {}, {}
-    local ok, list = pcall(function() return ZoneDB:GetDungeons() end)
+    local ok, list = pcall(AskBot.Compat.Dungeons)
     if ok and type(list) == "table" then
         for id, d in pairs(list) do
             if type(d) == "table" and type(d[1]) == "string" then
@@ -195,7 +195,7 @@ local function dungeonFor(areaId)
     return dungeonByArea[areaId]
 end
 
---- Questie's dungeons as a name list for D.FindByName: { key, entry, name }.
+--- QuestieDB's dungeons as a name list for D.FindByName: { key, entry, name }.
 function D.DungeonNames()
     loadDungeons()
     return dungeonNames

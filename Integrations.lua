@@ -265,12 +265,11 @@ function Crafts.Colour(c, skill)
     return "grey"
 end
 
---- A place for the instance's entrance(s), from Questie's dungeon table, or nil.
+--- A place for the instance's entrance(s), from QuestieDB's dungeon table, or nil.
 function Loot.EntrancePlace(instance)
     if instance.entrance ~= nil then return instance.entrance or nil end
     instance.entrance = false
-    local zoneDB = QuestieLoader and QuestieLoader:ImportModule("ZoneDB")
-    local ok, dungeons = pcall(function() return zoneDB:GetDungeons() end)
+    local ok, dungeons = pcall(AskBot.Compat.Dungeons)
     local d = ok and type(dungeons) == "table" and instance.areaId and dungeons[instance.areaId]
     if d and type(d[4]) == "table" then
         local spawnList = {}

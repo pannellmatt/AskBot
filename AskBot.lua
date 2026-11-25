@@ -69,19 +69,25 @@ local function startIndexing()
     end)
 end
 
--- Questie builds its zone tables during its own staged start-up, so wait for it.
-local function waitForQuestie()
+-- QuestieDB is ready at login. Questie is optional, but when it's running, give it time to
+-- finish its staged start-up so its quest checks are used from the first answer.
+local function questieLoading()
+    local isLoaded = (C_AddOns and C_AddOns.IsAddOnLoaded) or IsAddOnLoaded
+    local loaded = isLoaded and isLoaded("Questie")
+    return loaded and not (Questie and Questie.started)
+end
+
+local function waitForData()
     local waited = 0
     local ticker
     ticker = C_Timer.NewTicker(1, function()
         waited = waited + 1
-        local ready = Questie and Questie.started and QuestieLoader and _G.LibQuestieDB
-            and _G.NpcDB and _G.QuestDB and _G.ItemDB and _G.ObjectDB
-        if not ready then
-            if waited >= 180 then
+        local dataReady = _G.LibQuestieDB and _G.NpcDB and _G.QuestDB and _G.ItemDB and _G.ObjectDB
+        if not dataReady or (questieLoading() and waited < 90) then
+            if not dataReady and waited >= 30 then
                 ticker:Cancel()
                 D.status = "failed"
-                say("Gave up waiting for Questie to finish loading.")
+                say("QuestieDB isn't loaded, and AskBot needs it. Is it installed and enabled?")
             end
             return
         end
@@ -95,14 +101,13 @@ local function waitForQuestie()
         end
 
         local hbd = LibStub and LibStub("HereBeDragons-2.0", true)
-        local zoneDB = QuestieLoader:ImportModule("ZoneDB")
         local flags = LibQuestieDB.Enum and LibQuestieDB.Enum.npcFlags
-        if not hbd or not zoneDB or not flags then
+        if not hbd or not flags then
             D.status = "failed"
-            say("Missing a piece from Questie (HereBeDragons, ZoneDB or NPC flags).")
+            say(hbd and "QuestieDB has no NPC flags; it may be too old." or "HereBeDragons isn't loaded, and AskBot needs it. Is it installed and enabled?")
             return
         end
-        D.Init(hbd, zoneDB, flags)
+        D.Init(hbd, flags)
         startIndexing()
     end)
 end
@@ -146,7 +151,7 @@ events:SetScript("OnEvent", function(_, event, ...)
     if event == "PLAYER_LOGIN" then
         AskBotCharDB = AskBotCharDB or {}
         AskBotCharDB.knownTaxi = AskBotCharDB.knownTaxi or {}
-        waitForQuestie()
+        waitForData()
     elseif event == "TAXIMAP_OPENED" then
         local ok, learned = pcall(D.RecordTaxiNodes)
         if ok and learned and learned > 0 then
