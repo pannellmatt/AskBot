@@ -1,7 +1,5 @@
 # AskBot
 
-![AskBot: ask where anything is, right from chat](https://raw.githubusercontent.com/pannellmatt/AskBot/main/media/askbot-hero.png)
-
 **Ask where anything is, right from chat.**
 
 AskBot answers the questions you'd normally alt-tab to a database site for, without leaving the game. Type a question, get the nearest answer for *your* character, and click once to put a waypoint on it.
