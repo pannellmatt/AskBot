@@ -273,6 +273,7 @@ local function answer(question)
     end
     local costOf = not questId and AskBot.Levelling.costSubject(q)
     if costOf then return AskBot.Levelling.answerQuestCost(costOf) end
+    if not questId and AskBot.Levelling.lockpickQuestsQuestion(q) then return AskBot.Levelling.answerLockpickQuests() end
     if not questId and AskBot.Levelling.reagentQuestsQuestion(q) then
         return AskBot.Levelling.answerReagentQuests(AskBot.Levelling.reagentLogOnly(q))
     end
@@ -482,7 +483,7 @@ function AskBot.IsPersonalQuestion(question)
     if gearQuestion(q) or bagUpgradeQuestion(q) or trainingQuestion(q) then return true end
     if AskBot.Levelling.bestQuestsQuestion(q) or AskBot.Levelling.killQuestsQuestion(q) or AskBot.Levelling.questsNearSubject(q)
         or AskBot.Levelling.questsToSubject(q) or AskBot.Levelling.reagentQuestsQuestion(q)
-        or AskBot.Levelling.costSubject(q) then return true end
+        or AskBot.Levelling.costSubject(q) or AskBot.Levelling.lockpickQuestsQuestion(q) then return true end
     if question:find("|Hquest") and AskBot.Levelling.costWords(wordsOutsideLinks(question)) then return true end
     if personalProfession(q) then return true end
     if HEARTH_QUESTIONS[q] then return true end

@@ -1554,4 +1554,4 @@ Quests.questGivers, Quests.joinSome, Quests.groupUnits = questGivers, joinSome, 
 Quests.answerChain, Quests.answerAfter, Quests.findDungeon = answerChain, answerAfter, findDungeon
 Quests.answerDungeonPrep, Quests.answerWhoHas = answerDungeonPrep, answerWhoHas
 Quests.REP_PATTERNS, Quests.answerRep, Quests.STARTER_QUESTIONS = REP_PATTERNS, answerRep, STARTER_QUESTIONS
-Quests.answerQuestStarters = answerQuestStarters
+Quests.answerQuestStarters, Quests.stepText, Quests.giverText = answerQuestStarters, stepText, giverText

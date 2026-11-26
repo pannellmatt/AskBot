@@ -1404,6 +1404,9 @@ do
         failures = failures + 1; print("   !! FAIL: vendoring should rank the Pants first")
     end
     ask("how do i level leatherworking and vendor everything", "(vendoring what you make")
+    ask("leveling [leatherworking] ah", "(counting what you can sell them for)", { "vendoring what you make" })
+    ask("level leatherworking and sell on the ah", "(counting what you can sell them for)")
+    ask("leatherworking ah", nil, { "cheapest skill-ups" })
     -- With AHDB history, AH mats count at their usual price (Light Leather 2s, not 1s today).
     AuctionDB = { PlayerHouse = function() return "Alliance" end,
         Typical = function(_, id) if id == 2318 then return 200, 250, 5 end return 0, 0, 0 end }
@@ -1923,6 +1926,22 @@ ask("nearest fp", "Thor", { "Dungar Longdrink" })
 if tomtomWaypoints ~= pinsBefore then failures = failures + 1; print("   !! FAIL: pinned with auto-pin off") end
 AskBot.SetOption("maxResults", 3)
 AskBot.SetOption("autoPin", true)
+
+-- Rogue lockpicking quests: Alther's Mill (Alliance) after Redridge Rendezvous; Plundering the
+-- Plunderers is Horde only. Added late so earlier answers don't see them.
+quests[2281] = { "Redridge Rendezvous", 1, { { 9 } }, { { 16 } }, 16, 16 }
+quests[2282] = { "Alther's Mill", 1, { { 16 } }, { { 16 } }, 20, 16 }
+quests[2381] = { "Plundering the Plunderers", 2, { { 3 } }, { { 3 } }, 18, 16 }
+quests[2359], quests[1999], quests[2478] = nil, nil, nil
+chain[2282] = { single = { 2281 } }
+doable[2281] = true
+ask("rogue lockpicking quests", { "Rogue lockpicking quests|cffaaaaaa (rogues only)|r:", "Alther's Mill",
+    "first ", "Redridge Rendezvous", "pick up from |cffffd100Gryan Stoutmantle" }, { "Plundering" })
+completed[2281], completed[2282] = true, true
+ask("pick lock quests", { "Alther's Mill", "done" }, { "Redridge Rendezvous" })
+ask("lockpicking", nil, { "Rogue lockpicking quests" })
+quests[2281], quests[2282], quests[2381], chain[2282], doable[2281] = nil, nil, nil, nil, nil
+completed[2281], completed[2282] = nil, nil
 
 print(failures == 0 and "\nALL PASSED" or ("\n" .. failures .. " FAILURE(S)"))
 os.exit(failures == 0 and 0 or 1)

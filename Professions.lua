@@ -1155,18 +1155,26 @@ end
 
 -- "level blacksmithing vendor": skill-ups that vendor what you make (needs a levelling word, as
 -- "blacksmithing vendor" alone could be a merchant).
-local VENDOR_ENDINGS = { " and vendor what i make", " and vendor everything", " and vendor it", " and vendor them",
-    " and vendor", " vendoring everything", " vendoring it", " vendoring them", " vendoring", " by vendoring",
-    " to vendor", " for vendor", " for vendoring", " for vendors", " selling to vendors", " selling to vendor",
-    " sell to vendor", " sell to vendors", " with vendoring", " vendor everything", " vendor it", " vendor" }
+-- "level [Leatherworking] AH": sell what you make on the AH (the "with profit" mode).
+-- One table (mode -> endings) to stay under the file's 200-locals limit.
+local PLAN_ENDINGS = {
+    { mode = "vendor", " and vendor what i make", " and vendor everything", " and vendor it", " and vendor them",
+        " and vendor", " vendoring everything", " vendoring it", " vendoring them", " vendoring", " by vendoring",
+        " to vendor", " for vendor", " for vendoring", " for vendors", " selling to vendors", " selling to vendor",
+        " sell to vendor", " sell to vendors", " with vendoring", " vendor everything", " vendor it", " vendor" },
+    { mode = true, " and sell on the ah", " and sell on the auction house", " selling on the ah",
+        " selling on the auction house", " sell on the ah", " sell on the auction house", " on the ah",
+        " on the auction house", " for the ah", " for ah", " to the ah", " with ah", " auction house", " ah" } }
 
---- "level [Blacksmithing] with profit" / "... vendor": the profession, and the mode (true =
---- count what crafts sell for; "vendor" = what vendors pay, with AH mats at their usual price).
+--- "level [Blacksmithing] with profit" / "... AH" / "... vendor": the profession, and the mode
+--- (true = count what crafts sell for; "vendor" = what vendors pay, with AH mats at their usual price).
 local function withProfitProfession(q)
-    for _, w in ipairs(VENDOR_ENDINGS) do
-        if q:sub(-#w) == w then
-            local prof = skillUpProfession(q:sub(1, -#w - 1))
-            if prof then return prof, "vendor" end
+    for _, endings in ipairs(PLAN_ENDINGS) do
+        for _, w in ipairs(endings) do
+            if q:sub(-#w) == w then
+                local prof = skillUpProfession(q:sub(1, -#w - 1))
+                if prof then return prof, endings.mode end
+            end
         end
     end
     local base = q:gsub(" with profits?$", ""):gsub(" profitably$", ""):gsub(" and profit$", "")

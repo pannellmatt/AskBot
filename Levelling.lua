@@ -1843,6 +1843,56 @@ local function answerQuestsTo(subject)
     end
 end
 
+--------------------------------------------------------------------------------------------
+-- Rogue lockpicking quests
+--------------------------------------------------------------------------------------------
+
+-- Rogue class quests with a locked box to open (Questie has no lockpicking tag, so by ID):
+-- Alther's Mill (Lucius's Lockbox), Tools of the Trade (Ambermill Strongbox), Plundering the
+-- Plunderers (Southsea treasure), Klaven's Tower (Duskwood Chest), Mission: Possible But Not
+-- Probable (Gallywix's Lockbox). questForMe leaves out the other faction's and races'.
+Levelling.LOCKPICK_QUESTS = { 2282, 1999, 2381, 2359, 2478 }
+
+--- "rogue lockpicking quests", "pick lock quests", "lock picking quests".
+function Levelling.lockpickQuestsQuestion(q)
+    if not (q:find("quest", 1, true)) then return false end
+    return (q:find("lockpick", 1, true) or q:find("lock pick", 1, true) or q:find("pick lock", 1, true)
+        or q:find("picklock", 1, true)) ~= nil
+end
+
+function Levelling.answerLockpickQuests()
+    if AskBot.asker then return say("That depends on which quests you've done, so it needs your own AskBot.") end
+    local inLog = {}
+    for _, q in ipairs(questLogEntries()) do inLog[q.id] = true end
+    local mine = {}
+    for _, id in ipairs(Levelling.LOCKPICK_QUESTS) do
+        if QuestDB.name(id) and questForMe(id) then mine[#mine + 1] = id end
+    end
+    table.sort(mine, function(a, b) return (QuestDB.questLevel(a) or 0) < (QuestDB.questLevel(b) or 0) end)
+    if #mine == 0 then return say("I don't know any lockpicking quests for your faction.") end
+    say("Rogue lockpicking quests" .. (askerClass() ~= "ROGUE" and (GREY .. " (rogues only)|r") or "") .. ":")
+    local firstPin
+    for _, id in ipairs(mine) do
+        local status = questStatus(id, inLog)
+        local line
+        if status == "done" or status == "inLog" then
+            line = AskBot.Quests.stepText(id, status)
+        else
+            -- The first quest still to do in its chain (it may be this one).
+            local first = missingSteps(id, inLog, {}, {}, 0)[1]
+            local st = first == id and status or questStatus(first, inLog)
+            line = (first ~= id and ("first " .. questLabel(first) .. ": ") or "")
+                .. (st == "locked" and (GREY .. "not available to you yet|r") or AskBot.Quests.stepText(first, st))
+            if not firstPin and st == "ready" then
+                local _, best = AskBot.Quests.giverText(first)
+                if best then firstPin = { best = best, name = QuestDB.name(first) } end
+            end
+        end
+        say("  " .. questLabel(id) .. " - " .. line)
+    end
+    if firstPin then autoPin(firstPin.best.place, firstPin.best.spawn, firstPin.name) end
+end
+
 -- For the files loaded after this one.
 Levelling.answerQuestLog, Levelling.doableQuests = answerQuestLog, doableQuests
 Levelling.answerQuestsHere, Levelling.currentZoneMap = answerQuestsHere, currentZoneMap
