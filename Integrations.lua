@@ -136,100 +136,109 @@ function Loot.Build()
 end
 
 --------------------------------------------------------------------------------------------
--- AtlasLoot crafting data: every craft with its skill colours, reagents and recipe item
+-- Crafting data: every recipe with its skill colours, reagents, recipe item and trainer cost,
+-- baked from ForeverRecipes into RecipeData.lua (tools/frbake.lua): Forever's own numbers.
 --------------------------------------------------------------------------------------------
 
 local Crafts = {
-    status = "absent", -- absent | loading | ready
+    status = "absent", -- absent | ready
     bySpell = {},      -- spell id -> craft
     byProf = {},       -- profession name -> list of crafts
     list = {},
 }
 AskBot.Crafts = Crafts
 
--- AtlasLoot's profession numbers
-local PROF_NAMES = { [1] = "First Aid", [2] = "Blacksmithing", [3] = "Leatherworking", [4] = "Alchemy",
-    [6] = "Cooking", [8] = "Tailoring", [9] = "Engineering", [10] = "Enchanting", [13] = "Poisons" }
-
---- craft = { spell, item, made, prof, learn, yellow, green, grey, reagents = { { id, count } }, recipe }
+--- craft = { spell, item, made, prof, learn, yellow, green, grey, reagents = { { id, count } },
+--- recipe (item that teaches it), trainCost (copper a trainer charges; nil = no trainer teaches
+--- it, 0 = free or automatic), spec (specialisation spell it needs), name }
 --- (skill colours: orange from `learn`, yellow from `yellow`, green from `green`, grey from `grey`).
-local function makeCraft(spell, data, Recipe)
-    local prof = PROF_NAMES[data[2]]
-    if not prof then return nil end
-    local c = { spell = spell, item = data[1], made = data[8] or 1, prof = prof, learn = data[3] or 1,
-        yellow = data[4] or 0, grey = data[5] or 0, reagents = {} }
-    c.green = math.floor((c.yellow + c.grey) / 2)
-    for i, id in ipairs(data[6] or {}) do
-        c.reagents[#c.reagents + 1] = { id = id, count = (data[7] and data[7][i]) or 1 }
+function Crafts.Build(data)
+    Crafts.bySpell, Crafts.byProf, Crafts.list = {}, {}, {}
+    Crafts.status, Crafts.why, Crafts.version = "absent", "RecipeData.lua is missing", nil
+    if not (data and data.crafts) then return end
+    local spells = {}
+    for spell in pairs(data.crafts) do spells[#spells + 1] = spell end
+    table.sort(spells)
+    for _, spell in ipairs(spells) do
+        local d = data.crafts[spell]
+        local c = { spell = spell, prof = d[1], learn = d[2], yellow = d[3], green = d[4], grey = d[5],
+            item = d[6] or nil, made = d[7] or 1, recipe = d[8] or nil, trainCost = d[9] or nil,
+            spec = d[10] or nil, name = d[11], reagents = {} }
+        local r = d[12] or {}
+        for i = 1, #r, 2 do c.reagents[#c.reagents + 1] = { id = r[i], count = r[i + 1] } end
+        Crafts.bySpell[spell] = c
+        Crafts.list[#Crafts.list + 1] = c
+        local l = Crafts.byProf[c.prof]
+        if not l then l = {}; Crafts.byProf[c.prof] = l end
+        l[#l + 1] = c
     end
-    if Recipe and Recipe.GetRecipeForSpell then
-        local ok, r = pcall(Recipe.GetRecipeForSpell, spell)
-        if ok and type(r) == "number" then c.recipe = r end
-    end
-    return c
+    Crafts.status, Crafts.why, Crafts.version = "ready", nil, data.version
 end
+Crafts.Build(AskBot.RecipeData)
 
---- Index AtlasLoot's crafting module. Runs as a coroutine.
-function Crafts.Build()
-    local AL = _G.AtlasLoot
-    local P = AL and AL.Data and AL.Data.Profession
-    if not (AL and AL.ItemDB and AL.ItemDB.Storage and AL.Loader and P and P.GetProfessionData) then
-        Crafts.status, Crafts.why = "absent", "AtlasLoot's profession API is missing"
-        return
-    end
-    Crafts.status = "loading"
-    local name = "AtlasLootClassic_Crafting"
-    local loaded = false
-    -- LoadModule returns true (already loaded), nil (just loaded it, or AtlasLoot doesn't know
-    -- the module), "InCombat" (loads after combat) or a reason it can't ("DISABLED", "MISSING"...).
-    local result = AL.Loader:LoadModule(name, function() loaded = true end)
-    local function isLoaded()
-        if loaded or result == true then return true end
-        local api = C_AddOns and C_AddOns.IsAddOnLoaded or IsAddOnLoaded
-        return api and api(name) and true or false
-    end
-    if result ~= nil and result ~= true and result ~= "InCombat" then
-        Crafts.status, Crafts.why = "absent", "AtlasLootClassic_Crafting is " .. tostring(result):lower()
-        return
-    end
-    if result == nil and not isLoaded() then
-        Crafts.status, Crafts.why = "absent", "AtlasLootClassic_Crafting didn't load"
-        return
-    end
-    while not isLoaded() do coroutine.yield() end
+-- Forever's profession talent tree (the legacy professions tree, 1187). Overtime (1225451)
+-- raises the skill-up chance by 4% of itself per rank: yellow 87% is 90% with one rank. Read
+-- the way ForeverRecipes does: purchased ranks are on the node, for committed entries only.
+local OVERTIME = 1225451
+local talentRanks
+function Crafts.InvalidateTalents() talentRanks = nil end
 
-    local mod = AL.ItemDB.Storage[name]
-    if type(mod) ~= "table" then Crafts.status, Crafts.why = "absent", "AtlasLootClassic_Crafting loaded no data"; return end
-    local Recipe = AL.Data.Recipe
-    for key, prof in pairs(mod) do
-        if type(key) == "string" and key:sub(1, 2) ~= "__" and type(prof) == "table" and type(prof.items) == "table" then
-            for _, group in ipairs(prof.items) do
-                for diff, list in pairs(type(group) == "table" and group or {}) do
-                    if type(diff) == "number" and type(list) == "table" then
-                        for _, entry in ipairs(list) do
-                            local spell = type(entry) == "table" and entry[2]
-                            if type(spell) == "number" and not Crafts.bySpell[spell] then
-                                local ok, data = pcall(P.GetProfessionData, spell)
-                                local c = ok and type(data) == "table" and makeCraft(spell, data, Recipe)
-                                if c then
-                                    Crafts.bySpell[spell] = c
-                                    Crafts.list[#Crafts.list + 1] = c
-                                    local l = Crafts.byProf[c.prof]
-                                    if not l then l = {}; Crafts.byProf[c.prof] = l end
-                                    l[#l + 1] = c
-                                end
-                            end
-                        end
-                    end
+local function readTalentRanks()
+    local CT = C_Traits
+    if not (CT and CT.GetConfigIDByTreeID and CT.GetTreeNodes and CT.GetNodeInfo and CT.GetEntryInfo
+        and CT.GetDefinitionInfo) then return {} end
+    local treeID = Constants and Constants.LegacyConsts and Constants.LegacyConsts.LEGACY_TREE_PROFESSIONS_ID or 1187
+    local configID = CT.GetConfigIDByTreeID(treeID)
+    local nodes = configID and CT.GetTreeNodes(treeID)
+    if type(nodes) ~= "table" then return nil end
+    local ranks = {}
+    for _, nodeID in ipairs(nodes) do
+        local node = CT.GetNodeInfo(configID, nodeID)
+        for _, entryID in ipairs(node and node.entryIDs or {}) do
+            local entry = CT.GetEntryInfo(configID, entryID)
+            local def = entry and CT.GetDefinitionInfo(entry.definitionID)
+            local spell = def and (def.spellID or def.overriddenSpellID)
+            if spell then
+                local committed = false
+                for _, e in ipairs(node.entryIDsWithCommittedRanks or {}) do
+                    if e == entryID then committed = true end
                 end
+                ranks[spell] = committed and (node.ranksPurchased or 0) or 0
             end
-            coroutine.yield()
         end
     end
-    Crafts.status = "ready"
+    return ranks
 end
 
---- A craft's name: what it makes, or the spell's name (enchants).
+--- How much your talents raise a skill-up chance (0.04 per Overtime rank).
+function Crafts.SkillUpBonus()
+    if not talentRanks then
+        local ok, r = pcall(readTalentRanks)
+        if not (ok and r) then return 0 end -- tree not loaded yet: try again next time
+        talentRanks = r
+    end
+    return 0.04 * (talentRanks[OVERTIME] or 0)
+end
+
+--- Skill-up chance of craft `c` at `skill`: 1 for orange, (grey - skill) / (grey - yellow) after,
+--- raised by Overtime (at most 1).
+function Crafts.Chance(c, skill)
+    if skill < c.yellow then return 1 end
+    local base = math.max(0.05, (c.grey - skill) / math.max(1, c.grey - c.yellow))
+    return math.min(1, base * (1 + Crafts.SkillUpBonus()))
+end
+
+--- Can you learn craft `c` (ignoring skill)? A trainer or recipe item teaches it, and you have
+--- the specialisation it needs. Recipes with no known source (some Forever ones) are out.
+function Crafts.Learnable(c)
+    if c.spec then
+        local known = (IsPlayerSpell and IsPlayerSpell(c.spec)) or (IsSpellKnown and IsSpellKnown(c.spec))
+        if not known then return false end
+    end
+    return c.trainCost ~= nil or c.recipe ~= nil
+end
+
+--- A craft's name: the recipe's (baked in), else what it makes or the spell's name.
 function Crafts.Name(c)
     if c.name then return c.name end
     local n = c.item and ((C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(c.item)) or ItemDB.name(c.item))

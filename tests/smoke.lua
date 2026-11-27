@@ -490,22 +490,11 @@ AtlasLoot = {
             },
         },
     },
-        AtlasLootClassic_Crafting = {
-            Leatherworking = { name = "Leatherworking", items = {
-                { name = "Armor", [1] = { { 1, 2149 }, { 2, 2153 }, { 3, 2158 }, { 4, 2161 } } } } },
-        },
     } },
     Loader = { LoadModule = function(_, name, onLoad) onLoad(name) end },
     Data = {
         Droprate = { GetData = function(_, npc, item) return rates[npc] and rates[npc][item] end },
-        -- [spell] = { createdItem, profession (3 = Leatherworking), learn, yellow, grey, reagents, counts }
-        Profession = { GetProfessionData = function(spell) return ({
-            [2149] = { 2302, 3, 1, 40, 70, { 2318, 2320 }, { 2, 1 } },     -- Handstitched Leather Boots (trainer)
-            [2153] = { 2303, 3, 30, 45, 75, { 2318, 2320 }, { 4, 1 } },    -- Handstitched Leather Pants (trainer)
-            [2158] = { 2307, 3, 90, 120, 160, { 2318, 2320 }, { 5, 2 } },  -- Fine Leather Boots (pattern)
-            [2161] = { 2309, 3, 55, 85, 125, { 2318 }, { 6 } },           -- Embossed Leather Boots (trainer, later)
-        })[spell] end },
-        Recipe = { GetRecipeForSpell = function(spell) return ({ [2158] = 2406 })[spell] end },
+
     },
 }
 
@@ -545,6 +534,15 @@ local AskBot = {}
 for line in io.lines(dir .. "/AskBot.toc") do
     if line:match("%.lua%s*$") then assert(loadfile(dir .. "/" .. line:match("^%s*(.-)%s*$")))("AskBot", AskBot) end
 end
+-- Recipes: a small fixture in RecipeData.lua's shape (the real data is checked further down).
+-- [spell] = { prof, learn, yellow, green, grey, item, made, recipe item, train cost, spec, name, reagents }
+local realRecipeData = AskBot.RecipeData
+AskBot.Crafts.Build({ version = "test", crafts = {
+    [2149] = { "Leatherworking", 1, 40, 55, 70, 2302, 1, false, 500, false, "Handstitched Leather Boots", { 2318, 2, 2320, 1 } },
+    [2153] = { "Leatherworking", 30, 45, 60, 75, 2303, 1, false, 50, false, "Handstitched Leather Pants", { 2318, 4, 2320, 1 } },
+    [2158] = { "Leatherworking", 90, 120, 140, 160, 2307, 1, 2406, false, false, "Fine Leather Boots", { 2318, 5, 2320, 2 } },
+    [2161] = { "Leatherworking", 55, 85, 105, 125, 2309, 1, false, 300, false, "Embossed Leather Boots", { 2318, 6 } },
+} })
 
 -- Events go to every frame, as in the game.
 local function fire(event, ...)
@@ -1330,51 +1328,47 @@ do
     GetProfessions, GetProfessionInfo = nil, nil
     GetSkillLineInfo, GetNumSkillLines = getInfo, getNum
 end
--- AtlasLoot's crafting data: every recipe, known or not
+-- Crafting data: every recipe, known or not, with Forever's colours and trainer costs
 for id, name in pairs({ [2302] = "Handstitched Leather Boots", [2303] = "Handstitched Leather Pants",
     [2307] = "Fine Leather Boots", [2309] = "Embossed Leather Boots", [2318] = "Light Leather" }) do
     itemCache[id] = name
 end
 if AskBot.Crafts.status ~= "ready" then failures = failures + 1; print("   !! FAIL: crafts " .. AskBot.Crafts.status) end
 skillLines[#skillLines + 1] = { "Leatherworking", false, 35 }
+-- Training costs join the ranking (Pants 50c beats Boots 5s).
 ask("how do i level leatherworking", { "Leatherworking 35: cheapest skill-ups:",
-    "[Handstitched Leather Boots]|r |cffff8040orange|r - mats 10c+ learn: ", "[Leatherworking trainer]",
-    "[Handstitched Leather Pants]|r |cffff8040orange|r", "New trainer recipes at 55." }, { "Fine Leather Boots", "Embossed" })
--- A profession trainer window: training costs join the ranking (Pants 50c beats Boots 5s).
+    "[Handstitched Leather Pants]|r |cffff8040orange|r - mats 10c+ learn: ", "[Leatherworking trainer]", " 50c ", " 5s ",
+    "New trainer recipes at 55." }, { "Fine Leather Boots", "Embossed" })
 do
-    local tsList = { { "Leatherworking", "header", true }, { "Handstitched Leather Boots", "available", 500 },
-        { "Handstitched Leather Pants", "available", 50 }, { "Embossed Leather Boots", "unavailable", 300, 55 } }
-    local saved = { IsTradeskillTrainer, GetNumTrainerServices, GetTrainerServiceInfo, GetTrainerServiceCost }
-    function GetTrainerServiceSkillReq(i) return "Leatherworking", tsList[i][4] or 0, true end
-    function IsTradeskillTrainer() return true end
-    function GetNumTrainerServices() return #tsList end
-    function GetTrainerServiceInfo(i) return tsList[i][1], tsList[i][2] end
-    function GetTrainerServiceCost(i) return tsList[i][3] end
-    fire("TRAINER_SHOW")
-    advance(1)
-    IsTradeskillTrainer, GetNumTrainerServices, GetTrainerServiceInfo, GetTrainerServiceCost = saved[1], saved[2], saved[3], saved[4]
-    GetTrainerServiceSkillReq = nil
-    if AskBotDB.recipeTrainingLevel[AskBot.Data.NameKey("Embossed Leather Boots")] ~= 55 then
-        failures = failures + 1; print("   !! FAIL: trainer skill level not recorded")
-    end
-    ask("how do i level leatherworking", { "[Handstitched Leather Pants]|r |cffff8040orange|r - mats 10c+ learn: ",
-        " 50c ", " 5s " })
+    local C = AskBot.Crafts
+    local boots, pants, embossed = C.bySpell[2149], C.bySpell[2153], C.bySpell[2161]
     -- Orange only wins when it's no dearer per point: at 42 the Boots are yellow (93%) but free
     -- to train, the orange Pants cost 50s to train (~1s 50c a point over the 33 points left).
     local lw = skillLines[#skillLines]
     lw[3] = 42
-    AskBotDB.recipeTraining[AskBot.Data.NameKey("Handstitched Leather Boots")] = 0
-    AskBotDB.recipeTraining[AskBot.Data.NameKey("Handstitched Leather Pants")] = 5000
+    boots.trainCost, pants.trainCost = 0, 5000
     ask("how do i level leatherworking", { "Leatherworking 42: cheapest skill-ups:",
-        "[Handstitched Leather Boots]|r |cffffff00yellow|r", " ~93%|r - mats 10c+ learn: ", " free ",
-        "[Handstitched Leather Pants]|r |cffff8040orange|r - mats 10c+ learn: ", " 50s " })
+        "[Handstitched Leather Boots]|r |cffffff00yellow|r", " 93%|r - mats 10c+ learn: ", " free ",
+        "[Handstitched Leather Pants]|r |cffff8040orange|r - mats 10c+ learn: ", " 50s " }, { "~93%" })
+    -- One rank of Forever's Overtime talent: 4% more of the chance (93% -> 97%).
+    C_Traits = {
+        GetConfigIDByTreeID = function(tree) return tree == 1187 and 7 or nil end,
+        GetTreeNodes = function() return { 1 } end,
+        GetNodeInfo = function() return { entryIDs = { 11 }, entryIDsWithCommittedRanks = { 11 }, ranksPurchased = 1 } end,
+        GetEntryInfo = function() return { definitionID = 21 } end,
+        GetDefinitionInfo = function() return { spellID = 1225451 } end,
+    }
+    AskBot.Crafts.InvalidateTalents()
+    ask("how do i level leatherworking", " 97%|r - mats 10c+ learn: ")
+    C_Traits = nil
+    AskBot.Crafts.InvalidateTalents()
     lw[3] = 35
     -- A plan to your cap: priced Light Leather (1s on the AH), 40 in your bags.
     ahPrices[2318], ahAges[2318] = 100, 0
     bags[2318] = 40
     AskBotCharDB.professions.Leatherworking = { rank = 35, max = 75, recipes = {} }
     ask("how do i level leatherworking", { "Plan to 75", " crafts, ~", "Buy: " })
-    -- For profit with AtlasLoot: Boots a trainer teaches sell for 19s after the cut, mats 2s 10c.
+    -- For profit: Boots a trainer teaches sell for 19s after the cut, mats 2s 10c.
     ahPrices[2302], ahAges[2302] = 2000, 0
     ask("leatherworking for profit", { "Leatherworking 35: most profitable crafts",
         "[Handstitched Leather Boots]|r |cff40ff40+16s 90c|r", "(sells 19s, mats 2s 10c)", "learn: " },
@@ -1387,9 +1381,7 @@ do
     ask("how do i level leatherworking", "Leatherworking 35/75: cheapest skill-ups", { "counting what", "sells 19s" })
     -- Levelling by vendoring: only what vendors pay counts (Boots 25c, Pants 3s), so the Pants
     -- (mats 3s 90c, free to train here) now beat the Boots (mats 2s) that win on AH prices.
-    local pantsKey = AskBot.Data.NameKey("Handstitched Leather Pants")
-    local pantsTraining = AskBotDB.recipeTraining[pantsKey]
-    AskBotDB.recipeTraining[pantsKey] = 0
+    pants.trainCost = 0
     local itemInfo = C_Item.GetItemInfo
     local vendorPays = { [2302] = 25, [2303] = 300 }
     C_Item.GetItemInfo = function(id)
@@ -1415,63 +1407,62 @@ do
     AuctionDB = nil
     ask("leatherworking vendor", nil, { "cheapest skill-ups" })
     C_Item.GetItemInfo = itemInfo
-    AskBotDB.recipeTraining[pantsKey] = pantsTraining
-    -- Embossed Leather Boots with no recipe item and not on your trainer's list (Forever's
-    -- Sterling Silver Boots): left out of profit and skill-ups even when you could make them.
+    pants.trainCost = 5000
+    -- Embossed Leather Boots with no trainer and no recipe item (some Forever recipes): left out
+    -- of profit and skill-ups even when you could make them.
     ahPrices[2309], ahAges[2309] = 9000, 0
-    local lw = skillLines[#skillLines]
     lw[3] = 60
-    local embossed = AskBot.Data.NameKey("Embossed Leather Boots")
-    local embossedCost = AskBotDB.recipeTraining[embossed]
     ask("leatherworking for profit", "[Embossed Leather Boots]")
-    AskBotDB.recipeTraining[embossed] = nil
+    embossed.trainCost = nil
     ask("leatherworking for profit", "Handstitched Leather Boots", { "Embossed" })
     ask("how do i level leatherworking", "Leatherworking 60/75: cheapest skill-ups", { "Embossed" })
-    AskBotDB.recipeTraining[embossed] = embossedCost
-    -- Before any trainer window: assumed taught, with a nudge to open the trainer.
-    local savedCosts = AskBotDB.recipeTraining
-    AskBotDB.recipeTraining = nil
-    ask("leatherworking for profit", { "Embossed Leather Boots", "Open your Leatherworking trainer once" })
-    AskBotDB.recipeTraining = savedCosts
-    -- Your trainer teaches Embossed at 30, not AtlasLoot's 55 (Forever's Heavy Grinding Stone:
-    -- 100, not 125): learnable at 35, orange with the colours moved down too.
-    lw[3] = 35
-    AskBotDB.recipeTrainingLevel[embossed] = 30
-    ask("leatherworking for profit", "[Embossed Leather Boots]|r |cff40ff40+79s 50c|r")
-    ask("how do i level leatherworking", "[Embossed Leather Boots]|r |cffff8040orange|r")
-    AskBotDB.recipeTrainingLevel[embossed] = 55
+    ask("recipe for embossed leather boots", "no trainer or recipe item for it is known")
+    embossed.trainCost = 300
+    -- A specialisation you don't have (Elemental Leatherworking): left out, and the recipe says so.
+    embossed.spec = 10658
+    local savedIsPlayerSpell = IsPlayerSpell
+    IsPlayerSpell = function() return false end
+    ask("leatherworking for profit", "Handstitched Leather Boots", { "Embossed" })
+    ask("recipe for embossed leather boots", "Needs ")
+    IsPlayerSpell = function(id) return id == 10658 end
+    ask("leatherworking for profit", "[Embossed Leather Boots]")
+    IsPlayerSpell, embossed.spec = savedIsPlayerSpell, nil
     lw[3] = 35
     ahPrices[2302], ahPrices[2309] = nil, nil
     -- More than the plan uses: the rest is worth selling (1s less the 5% cut each).
     bags[2318] = 200
     ask("how do i level leatherworking", { "Not needed, sell for ~27s 55c:", "29 |cffffffff[Light Leather]" }, { "Buy: 1" })
-    -- Your window beats AtlasLoot: it showed the Boots green at 35 (AtlasLoot: orange), so they're
-    -- out; it showed the Pants yellow (AtlasLoot: orange), so they show a chance with no "~".
-    local NK = AskBot.Data.NameKey
-    AskBotCharDB.professions.Leatherworking = { rank = 35, max = 75, recipes = {
-        [NK("Handstitched Leather Boots")] = { name = "Handstitched Leather Boots", diff = "easy", reagents = {} },
-        [NK("Handstitched Leather Pants")] = { name = "Handstitched Leather Pants", diff = "medium", reagents = {} } } }
-    ask("how do i level leatherworking", { "[Handstitched Leather Pants]|r |cffffff00yellow|r|cffaaaaaa ~100%" },
-        { "Handstitched Leather Boots]|r |c" })
     AskBotCharDB.professions.Leatherworking = nil
     bags[2318] = nil
 end
 ask("recipe for fine leather boots", { "[Fine Leather Boots]|r (Leatherworking 90): learn it from",
     "Pattern: Fine Leather Boots", "Thread Seller" })
-ask("how do i learn handstitched leather pants", "(Leatherworking 30): taught by trainers. |cff40ff40You can learn it now (35).")
+ask("how do i learn handstitched leather pants", "(Leatherworking 30): taught by trainers for 50s. |cff40ff40You can learn it now (35).")
 -- "when can I learn [item]": the skill it needs and how far you are.
-ask("when can i learn " .. il(2309), { "[Embossed Leather Boots]|r (Leatherworking 55): taught by trainers. You're at 35: 20 to go.",
+ask("when can i learn " .. il(2309), { "[Embossed Leather Boots]|r (Leatherworking 55): taught by trainers for 3s. You're at 35: 20 to go.",
     "[Leatherworking trainer]" })
 ask("when can i learn fine leather boots", { "(Leatherworking 90): learn it from", "You're at 35: 55 to go." })
 ask("mats for 2 fine leather boots", { "[Fine Leather Boots]|r x2 (Leatherworking):", "10 |cffffffff[Light Leather]|r: buy 10",
     "You don't know it yet (Leatherworking 90), learn: " })
 ask("cost to craft " .. il(2307) .. " from scratch", { "[Fine Leather Boots]|r (Leatherworking):", "buying everything",
     "You don't know it yet" })
--- Straight after a /reload, AtlasLoot's recipes are still loading: say so, not "none of your recipes".
-AskBot.Crafts.status = "loading"
-ask("cost to craft " .. il(2309) .. " from scratch", "Still reading AtlasLoot's recipes", { "None of your recipes" })
-AskBot.Crafts.status = "ready"
 table.remove(skillLines)
+-- The real baked data (ForeverRecipes): Forever's numbers, not Classic's.
+do
+    local C = AskBot.Crafts
+    local fixture = { bySpell = C.bySpell, byProf = C.byProf, list = C.list, version = C.version }
+    C.Build(realRecipeData)
+    local function check(ok, what) if not ok then failures = failures + 1; print("   !! FAIL: real recipe data: " .. what) end end
+    check(C.status == "ready" and #C.list > 2000, "status " .. C.status .. ", " .. #C.list .. " recipes")
+    local coarse = C.bySpell[3326]   -- Coarse Grinding Stone: green at 70 on Forever (Classic: 75)
+    check(coarse and coarse.prof == "Blacksmithing" and coarse.green == 70 and coarse.trainCost == 250, "Coarse Grinding Stone")
+    local heavy = C.bySpell[3337]    -- Heavy Grinding Stone: learnt at 100 on Forever (Classic: 125)
+    check(heavy and heavy.learn == 100, "Heavy Grinding Stone")
+    local boots = C.bySpell[1252232] -- Sterling Silver Boots: Forever plans, no trainer
+    check(boots and boots.recipe == 251335 and boots.trainCost == nil and #boots.reagents == 4, "Sterling Silver Boots")
+    check(C.bySpell[10630] and C.bySpell[10630].spec == 10658, "Gauntlets of the Sea specialisation")
+    C.bySpell, C.byProf, C.list, C.version = fixture.bySpell, fixture.byProf, fixture.list, fixture.version
+end
 
 -- Beasts you meet: the game says "Coyote" isn't one here, and "Grey Thing" is
 do

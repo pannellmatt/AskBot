@@ -57,13 +57,6 @@ local function startIndexing()
                     say("Couldn't read AtlasLoot's data: " .. tostring(lootErr))
                     if geterrorhandler then geterrorhandler()(lootErr) end
                 end
-                -- Then its crafting tables (professions answers fall back to your recipe window).
-                runInBackground(AskBot.Crafts.Build, function(craftOk, craftErr)
-                    if not craftOk then
-                        AskBot.Crafts.status = "absent"
-                        if geterrorhandler then geterrorhandler()(craftErr) end
-                    end
-                end)
             end)
         end
     end)
@@ -122,7 +115,7 @@ events:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 for _, event in ipairs({ "TRADE_SKILL_SHOW", "TRADE_SKILL_UPDATE", "TRADE_SKILL_LIST_UPDATE",
     "TRADE_SKILL_DATA_SOURCE_CHANGED", "CRAFT_SHOW", "CRAFT_UPDATE", "UPDATE_MOUSEOVER_UNIT", "PLAYER_TARGET_CHANGED",
     "UNIT_SPELLCAST_SUCCEEDED", "PLAYER_ENTERING_WORLD", "HEARTHSTONE_BOUND", "TRAINER_SHOW", "TRAINER_UPDATE",
-    "LEARNED_SPELL_IN_TAB", "MERCHANT_SHOW" }) do
+    "LEARNED_SPELL_IN_TAB", "MERCHANT_SHOW", "TRAIT_CONFIG_UPDATED" }) do
     local valid = not (C_EventUtils and C_EventUtils.IsEventValid) or C_EventUtils.IsEventValid(event)
     if valid then pcall(events.RegisterEvent, events, event) end
 end
@@ -192,8 +185,6 @@ events:SetScript("OnEvent", function(_, event, ...)
             if not ok and geterrorhandler then geterrorhandler()(err) end
             ok, err = pcall(AskBot.WeaponMasters.Record)
             if not ok and geterrorhandler then geterrorhandler()(err) end
-            ok, err = pcall(AskBot.Professions.recordTradeTraining)
-            if not ok and geterrorhandler then geterrorhandler()(err) end
         end)
     elseif event == "MERCHANT_SHOW" then
         -- Give Auctionator and the bag data a moment, then sell junk.
@@ -203,6 +194,8 @@ events:SetScript("OnEvent", function(_, event, ...)
             ok, err = pcall(AskBot.Junk.OnMerchant)
             if not ok and geterrorhandler then geterrorhandler()(err) end
         end)
+    elseif event == "TRAIT_CONFIG_UPDATED" then
+        AskBot.Crafts.InvalidateTalents()
     elseif event == "LEARNED_SPELL_IN_TAB" then
         pcall(AskBot.LearnedSpell, (...))
     elseif event == "ZONE_CHANGED_NEW_AREA" then
@@ -268,8 +261,8 @@ local function status()
     local C = AskBot.Crafts
     local nCrafts = 0
     for _ in pairs(C.bySpell) do nCrafts = nCrafts + 1 end
-    say("AtlasLoot crafting: " .. (C.status == "ready" and (nCrafts .. " recipes") or C.status == "loading" and "loading..."
-        or ("not used" .. (C.why and (" (" .. C.why .. ")") or (_G.AtlasLoot and " (not started)" or "")))) .. ".")
+    say("Recipes: " .. (C.status == "ready" and (nCrafts .. " (ForeverRecipes " .. tostring(C.version) .. " data)")
+        or ("none (" .. tostring(C.why) .. ")")) .. ".")
     if D.status == "ready" then
         local parts = {}
         for _, t in ipairs(AskBot.targets) do

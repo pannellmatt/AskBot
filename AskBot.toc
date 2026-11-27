@@ -2,7 +2,7 @@
 ## Title: AskBot
 ## Notes: Ask where things are: /askbot where is my nearest skinning trainer
 ## Author: pannellmatt
-## Version: 1.1.0
+## Version: 1.2.0
 ## IconTexture: Interface\Icons\INV_Misc_Spyglass_03
 ## X-License: GPL-3.0-or-later
 ## Dependencies: QuestieDB, HereBeDragons
@@ -16,6 +16,7 @@ Gathering.lua
 Options.lua
 Compat.lua
 Data.lua
+RecipeData.lua
 Integrations.lua
 Gear.lua
 Output.lua
